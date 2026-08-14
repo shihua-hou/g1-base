@@ -53,9 +53,9 @@ RUN chmod +x /start_g1_base.sh
 
 # 运行时可写数据统一落到数据卷，容器重建不丢现场的图和路线
 ENV G1_DATA_DIR=/data \
-    G1_WEB_PORT=8080
+    G1_WEB_PORT=8081
 
-EXPOSE 8080
+EXPOSE 8081
 
 # ENTRYPOINT 继承自基础镜像（负责按 G1_DDS_INTERFACES 绑定 CycloneDDS + 激活 bt_env）
 CMD ["/start_g1_base.sh"]

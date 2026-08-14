@@ -238,7 +238,7 @@
           <h1>Robot Console</h1>
           <p>输入机器人上运行 g1_web_bridge 的 IP 地址与端口</p>
           <div class="field"><label>IP 地址</label><input id="ip-input" placeholder="192.168.10.99" inputmode="decimal" /></div>
-          <div class="field"><label>端口</label><input id="port-input" placeholder="8080" inputmode="numeric" /></div>
+          <div class="field"><label>端口</label><input id="port-input" placeholder="8081" inputmode="numeric" /></div>
           <button class="btn primary block" id="connect-btn">连接</button>
         </div>
       </div>
@@ -250,7 +250,7 @@
     }
     document.getElementById("connect-btn").addEventListener("click", async () => {
       const ip = document.getElementById("ip-input").value.trim();
-      const port = document.getElementById("port-input").value.trim() || "8080";
+      const port = document.getElementById("port-input").value.trim() || "8081";
       if (!ip) { toast("请输入 IP 地址", "error"); return; }
       const url = `http://${ip}:${port}`;
       try {

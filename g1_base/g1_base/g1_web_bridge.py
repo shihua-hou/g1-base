@@ -6,9 +6,9 @@
 
 用法::
 
-    ros2 run g1_base g1_web_bridge --net-if enP8p1s0 --port 8080
+    ros2 run g1_base g1_web_bridge --net-if enP8p1s0 --port 8081
 
-iPad 端浏览器打开 http://<机器人IP>:8080/ 即可。
+iPad 端浏览器打开 http://<机器人IP>:8081/ 即可。
 """
 
 import argparse
@@ -1599,7 +1599,7 @@ def make_handler(node: BridgeNode):
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="G1 iPad 上位机 HTTP 网关")
     parser.add_argument("--net-if", default="enP8p1s0")
-    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--port", type=int, default=8081)
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--map-frame", default="map")
     parser.add_argument("--base-frame", default="base_link")

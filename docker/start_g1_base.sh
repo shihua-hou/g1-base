@@ -11,7 +11,7 @@ set -uo pipefail
 G1_LIB=/root/g1_ws/install/g1_base/lib/g1_base
 G1_SHARE=/root/g1_ws/install/g1_base/share/g1_base
 G1_DATA_DIR="${G1_DATA_DIR:-/data}"
-G1_WEB_PORT="${G1_WEB_PORT:-8080}"
+G1_WEB_PORT="${G1_WEB_PORT:-8081}"
 # 网页网关只用它显示"机器人 IP"，默认跟 DDS 用同一张网卡
 G1_NET_IF="${G1_NET_IF:-${G1_DDS_INTERFACES:-enP8p1s0}}"
 

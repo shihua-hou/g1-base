@@ -24,7 +24,7 @@ services:
       G1_DDS_INTERFACES: "${G1_NET_IF:-enP8p1s0}"
       # 网页网关显示用的网卡与端口
       G1_NET_IF: "${G1_NET_IF:-enP8p1s0}"
-      G1_WEB_PORT: "${G1_WEB_PORT:-8080}"
+      G1_WEB_PORT: "${G1_WEB_PORT:-8081}"
       # 运行时可写数据落到数据卷
       G1_DATA_DIR: /data
 
