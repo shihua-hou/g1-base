@@ -1841,10 +1841,12 @@
       <aside class="pane work-d">
         <div class="pane-head"><div class="eyebrow">定量转向</div></div>
         <div class="pane-body" style="display:flex;flex-direction:column;gap:9px">
-          <button class="btn block" data-rotate="-90">↺ 左转 90°</button>
-          <button class="btn block" data-rotate="-30">↺ 左转 30°</button>
-          <button class="btn block" data-rotate="30">↻ 右转 30°</button>
-          <button class="btn block" data-rotate="90">↻ 右转 90°</button>
+          <!-- 后端 _rotate_robot: angle_deg >= 0 → wz 为正 → 逆时针 → 左转。
+               之前这里把正负标反了，点"左转"实际会右转。 -->
+          <button class="btn block" data-rotate="90">↺ 左转 90°</button>
+          <button class="btn block" data-rotate="30">↺ 左转 30°</button>
+          <button class="btn block" data-rotate="-30">↻ 右转 30°</button>
+          <button class="btn block" data-rotate="-90">↻ 右转 90°</button>
         </div>
         <div class="pane-foot" style="display:block">
           <div class="field" style="margin:0"><label>定量移动 (m): <span id="dist-val">0.5</span></label>
