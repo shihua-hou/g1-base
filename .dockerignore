@@ -28,3 +28,10 @@ g1_base/memory/
 g1_base/sdk_test/
 g1_base/tests/
 g1_base/test/
+
+# third_party 是 LIO 三件套的 submodule，必须进构建上下文（Dockerfile 要 COPY）
+# 但它们自己的构建产物不要
+third_party/*/build/
+third_party/*/install/
+third_party/*/log/
+third_party/**/.git

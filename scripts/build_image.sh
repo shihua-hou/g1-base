@@ -35,10 +35,28 @@ if ! docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
     exit 1
 fi
 
+cd "$REPO_ROOT"
+
+# LIO 三件套是 submodule（Super-LIO 是 GPL-3.0，不并进本仓库）。
+# 忘了 --recursive 克隆的话这里补上，否则 Dockerfile 会 COPY 到空目录。
+if [[ -f .gitmodules ]]; then
+    missing=0
+    for d in third_party/Livox-SDK2 third_party/livox_ros_driver2 third_party/Super-LIO; do
+        [[ -e "$d/CMakeLists.txt" || -d "$d/src" ]] || missing=1
+    done
+    if [[ "$missing" == "1" ]]; then
+        echo "[build] 拉取 submodule（Super-LIO / livox 驱动 / Livox-SDK2）..."
+        git submodule update --init --depth 1 || {
+            echo "[build] 错误：submodule 拉取失败。这台机器能访问 GitHub 吗？" >&2
+            exit 1
+        }
+    fi
+fi
+
 echo "[build] 基础镜像 ${BASE_IMAGE}"
 echo "[build] 目标 ${IMAGE_NAME}:${TAG}"
-cd "$REPO_ROOT"
-docker build --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "${IMAGE_NAME}:${TAG}" .
+# --network=host：构建期容器要能用宿主的 DNS，否则 apt 那一层解析失败
+docker build --network=host --build-arg "BASE_IMAGE=${BASE_IMAGE}" -t "${IMAGE_NAME}:${TAG}" .
 
 echo
 echo "[build] 完成：${IMAGE_NAME}:${TAG}"

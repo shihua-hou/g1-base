@@ -1,0 +1,10 @@
+[submodule "third_party/Super-LIO"]
+	path = third_party/Super-LIO
+	url = https://github.com/Liansheng-Wang/Super-LIO.git
+	branch = ros2
+[submodule "third_party/livox_ros_driver2"]
+	path = third_party/livox_ros_driver2
+	url = https://github.com/Livox-SDK/livox_ros_driver2.git
+[submodule "third_party/Livox-SDK2"]
+	path = third_party/Livox-SDK2
+	url = https://github.com/Livox-SDK/Livox-SDK2.git

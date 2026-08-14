@@ -1,0 +1,49 @@
+{
+  "_comment": [
+    "G1 机器人内网上的 MID360 配置。",
+    "host_net_info 里的 IP 必须是本机（PC2）在机器人内网上的地址 —— 雷达按这个地址推点云和 IMU。",
+    "启动脚本会用 G1_LIDAR_HOST_IP / G1_LIDAR_IP 环境变量把下面的占位地址替换掉，",
+    "所以一般不用手改这个文件。",
+    "注意：雷达同一时刻只把数据推给这里配置的一个 host，",
+    "跑本容器的 LIO 时不要同时跑宇树那套 navTask，否则互相抢。"
+  ],
+  "lidar_summary_info": {
+    "lidar_type": 8
+  },
+  "MID360": {
+    "lidar_net_info": {
+      "cmd_data_port": 56100,
+      "push_msg_port": 56200,
+      "point_data_port": 56300,
+      "imu_data_port": 56400,
+      "log_data_port": 56500
+    },
+    "host_net_info": {
+      "cmd_data_ip": "192.168.123.164",
+      "cmd_data_port": 56101,
+      "push_msg_ip": "192.168.123.164",
+      "push_msg_port": 56201,
+      "point_data_ip": "192.168.123.164",
+      "point_data_port": 56301,
+      "imu_data_ip": "192.168.123.164",
+      "imu_data_port": 56401,
+      "log_data_ip": "",
+      "log_data_port": 56501
+    }
+  },
+  "lidar_configs": [
+    {
+      "ip": "192.168.123.120",
+      "pcl_data_type": 1,
+      "pattern_mode": 0,
+      "extrinsic_parameter": {
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0,
+        "x": 0,
+        "y": 0,
+        "z": 0
+      }
+    }
+  ]
+}
