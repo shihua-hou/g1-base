@@ -512,9 +512,17 @@
       ? `${(liveMapGeo.width * liveMapGeo.resolution).toFixed(1)} × ${(liveMapGeo.height * liveMapGeo.resolution).toFixed(1)} m`
       : "—";
     return `
+      ${l.cloud_frame && l.tf_ok === false ? `
+        <div class="task-block tone-crit" style="margin-bottom:10px">
+          <div class="task-label">点云无法入图</div>
+          <div class="task-value" style="font-size:var(--fs-md)">坐标系 ${escapeHtml(l.cloud_frame)}</div>
+          <div class="task-sub" style="white-space:normal">${escapeHtml(l.tf_error || "")}<br>
+            已丢弃 ${l.dropped_no_tf || 0} 帧。点云在传感器坐标系，没有定位就无法拼成地图。</div>
+        </div>` : ""}
       <div class="kv-list">
         ${kvHtml("运行模式", navm.mode || "—", navm.mode === "mapping" ? "is-ok" : "is-dim",
                  navm.mode === "mapping" ? "ok" : "")}
+        ${kvHtml("点云坐标系", l.cloud_frame || "—", l.tf_ok ? "is-ok" : "is-crit")}
         ${kvHtml("栈状态", navm.state || "—", navm.ready ? "is-ok" : "is-warn")}
         ${kvHtml("点云", l.streaming ? "接收中" : "无数据", l.streaming ? "is-ok" : "is-crit",
                  l.streaming ? "ok" : "bad")}

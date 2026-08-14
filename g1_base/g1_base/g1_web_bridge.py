@@ -164,13 +164,23 @@ class LiveMapView:
     _VOXEL_BIAS = 1 << 20
 
     def __init__(self, node, cloud_topic="/lio/cloud_world", resolution=0.05,
-                 z_min=-0.35, z_max=1.60, voxel_size=0.08, callback_group=None):
+                 z_min=-0.35, z_max=1.60, voxel_size=0.08, map_frame="map",
+                 frame_override="", callback_group=None):
         self.node = node
         self.topic = cloud_topic
         self.resolution = float(resolution)
         self.z_min = float(z_min)
         self.z_max = float(z_max)
         self.voxel_size = float(voxel_size)
+        # 点云未必是世界系的：G1 上 /lio/cloud_world 实际是 DDS 域桥把
+        # /utlidar/cloud_livox_mid360（传感器系）改了个名字，直接堆会糊成一团。
+        # 这里统一按 TF 变换到 map 系再累积；变换不了就不堆，并如实上报原因。
+        self.map_frame = map_frame
+        self.frame_override = (frame_override or "").strip()
+        self.cloud_frame = ""
+        self.tf_ok = False
+        self.dropped_no_tf = 0
+        self.tf_error = ""
         self.cells = set()
         # 3D 点云：按体素去重后按到达顺序追加，前端用下标做游标增量拉取
         self._voxel_keys = set()
@@ -198,6 +208,12 @@ class LiveMapView:
             xyz_all = None
             if np is not None and isinstance(arr, np.ndarray):
                 xyz_all = np.column_stack([arr["x"], arr["y"], arr["z"]]).astype(np.float64)
+                xyz_all = self._to_map_frame(xyz_all, msg.header)
+                if xyz_all is None:
+                    with self.lock:
+                        self.last_cloud_time = time.time()
+                        self.cloud_count += 1
+                    return
                 # 2D 栅格只要机器人能撞到的高度层，3D 视图用整帧（见 _accumulate_voxels）
                 xyz = xyz_all[(xyz_all[:, 2] >= self.z_min) & (xyz_all[:, 2] <= self.z_max)]
                 if xyz.shape[0]:
@@ -216,6 +232,52 @@ class LiveMapView:
             self._accumulate_voxels(xyz_all)
         except Exception as exc:
             self.node.get_logger().warning(f"live map cloud error: {exc}", throttle_duration_sec=5.0)
+
+    def _to_map_frame(self, xyz, header):
+        """把点云变换到 map 系。返回 None 表示这一帧不能用，别往地图上堆。
+
+        没有 TF 就意味着没有定位——这种时候把传感器系的点直接累积，
+        机器人一转整张图就糊了。宁可不画，也要让界面说清楚为什么。
+        """
+        frame = self.frame_override or (header.frame_id or "").strip()
+        self.cloud_frame = frame or "(空)"
+        if not frame or frame == self.map_frame:
+            self.tf_ok = True
+            self.tf_error = ""
+            return xyz
+
+        tf_buffer = getattr(self.node, "tf_buffer", None)
+        if tf_buffer is None:
+            self.tf_ok = False
+            self.tf_error = "网关没有 TF 缓存"
+            self.dropped_no_tf += 1
+            return None
+
+        tr = None
+        for stamp in (rclpy.time.Time.from_msg(header.stamp), rclpy.time.Time()):
+            try:
+                tr = tf_buffer.lookup_transform(self.map_frame, frame, stamp)
+                break
+            except TransformException:
+                continue
+        if tr is None:
+            self.tf_ok = False
+            self.tf_error = f"查不到 TF {self.map_frame}<-{frame}（定位没起来？）"
+            self.dropped_no_tf += 1
+            return None
+
+        q = tr.transform.rotation
+        t = tr.transform.translation
+        # 四元数转旋转矩阵
+        x, y, z, w = q.x, q.y, q.z, q.w
+        rot = np.array([
+            [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+            [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+            [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+        ])
+        self.tf_ok = True
+        self.tf_error = ""
+        return xyz @ rot.T + np.array([t.x, t.y, t.z])
 
     def _accumulate_voxels(self, xyz):
         """把整帧点云按体素去重后追加进 3D 缓冲。
@@ -278,6 +340,7 @@ class LiveMapView:
             self._voxel_keys = set()
             self._voxel_xyz = array("f")
             self._z_range = [None, None]
+            self.dropped_no_tf = 0
         return {"success": True, "message": "实时地图已清空"}
 
     def info(self):
@@ -299,6 +362,12 @@ class LiveMapView:
             "voxel_count": voxels,
             "z_min": zlo,
             "z_max": zhi,
+            # 建图为什么没数据 / 为什么糊，全靠这几项说清楚
+            "cloud_frame": self.cloud_frame,
+            "map_frame": self.map_frame,
+            "tf_ok": self.tf_ok,
+            "tf_error": self.tf_error,
+            "dropped_no_tf": self.dropped_no_tf,
         }
 
     def render(self, max_dim=900):
@@ -530,7 +599,8 @@ class BridgeNode(Node):
         # ── 建图实时视图：直接吃 super-lio 的世界点云，自己攒栅格 ──
         self.live_map = LiveMapView(
             self, cloud_topic=args.cloud_topic, resolution=args.live_map_resolution,
-            voxel_size=args.live_cloud_voxel, callback_group=self._group,
+            voxel_size=args.live_cloud_voxel, map_frame=args.map_frame,
+            frame_override=args.cloud_frame_override, callback_group=self._group,
         )
 
         # ── 相机中继（有 CompressedImage 话题就转发 JPEG，没有就显示占位） ──
@@ -1709,6 +1779,10 @@ def parse_args(argv=None):
     parser.add_argument("--camera-topic", default="/camera/color/image_raw/compressed",
                         help="sensor_msgs/CompressedImage 话题；留空关闭相机中继")
     # Nav2 规划路径，画在地图上
+    parser.add_argument("--cloud-frame-override", default="",
+                        help="强制认定点云所在坐标系（留空则用消息里的 frame_id）。"
+                             "G1 上域桥转发的 /lio/cloud_world 其实是传感器系，"
+                             "frame_id 若不可信可用它指定，例如 base_link")
     parser.add_argument("--live-cloud-voxel", type=float, default=0.08,
                         help="建图 3D 点云的体素边长（米），越小越细但点数涨得快")
     parser.add_argument("--plan-topic", default="/plan",
