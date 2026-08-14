@@ -62,6 +62,10 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* hidden 属性必须压得住组件自己的 display —— 否则 .map-wrap{display:flex}
+   这类规则会让"隐藏"的元素照样占位（3D/2D 切换时点云区被挤掉一半就是这么来的）*/
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   height: 100%;
@@ -784,6 +788,39 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   position: relative; z-index: 2;
   transition: transform .06s linear;
   pointer-events: none;
+}
+
+/* ── 建图 3D 点云 ── */
+.cloud-stage {
+  flex: 1; min-width: 0; min-height: 0;
+  background: #0f1720;
+  touch-action: none;
+  cursor: grab;
+}
+.cloud-stage:active { cursor: grabbing; }
+.cloud-stage canvas { display: block; width: 100% !important; height: 100% !important; }
+.cloud-stage[hidden] { display: none; }
+/* 高度色带图例，叠在点云右下角；配色和 mapcloud.js 的 heightColor 一致 */
+.cloud-legend {
+  position: absolute; right: clamp(10px, 1vw, 16px); bottom: clamp(10px, 1.4vh, 18px);
+  display: flex; align-items: stretch; gap: 7px;
+  background: rgba(15, 23, 32, .72);
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: var(--r-sm);
+  padding: 7px 9px;
+  pointer-events: none;
+  z-index: 3;
+}
+.cloud-legend[hidden] { display: none; }
+.cloud-legend-bar {
+  width: 8px; border-radius: 4px;
+  background: linear-gradient(to top,
+    rgb(26, 64, 140), rgb(31, 158, 174), rgb(77, 184, 107), rgb(230, 194, 77), rgb(220, 92, 82));
+}
+.cloud-legend-txt {
+  font-family: var(--mono); font-size: 10px; line-height: 1.5;
+  color: rgba(255, 255, 255, .82);
+  white-space: nowrap;
 }
 
 /* ── 相机画面 ── */

@@ -14,6 +14,8 @@ iPad 端浏览器打开 http://<机器人IP>:8081/ 即可。
 import argparse
 import json
 import math
+import sys
+from array import array
 import os
 import re
 import shutil
@@ -156,15 +158,24 @@ class LiveMapView:
     """
 
     HARD_CAP_CELLS = 3_000_000
+    # 3D 体素上限：一格 12 字节，40 万格 ≈ 4.8MB，浏览器一次性吃得下
+    HARD_CAP_VOXELS = 400_000
+    # 体素坐标打包进 int64 时每轴的偏移（±100 万格，8cm 下 ±80km，够用了）
+    _VOXEL_BIAS = 1 << 20
 
     def __init__(self, node, cloud_topic="/lio/cloud_world", resolution=0.05,
-                 z_min=-0.35, z_max=1.60, callback_group=None):
+                 z_min=-0.35, z_max=1.60, voxel_size=0.08, callback_group=None):
         self.node = node
         self.topic = cloud_topic
         self.resolution = float(resolution)
         self.z_min = float(z_min)
         self.z_max = float(z_max)
+        self.voxel_size = float(voxel_size)
         self.cells = set()
+        # 3D 点云：按体素去重后按到达顺序追加，前端用下标做游标增量拉取
+        self._voxel_keys = set()
+        self._voxel_xyz = array("f")
+        self._z_range = [None, None]
         self.lock = threading.Lock()
         self.last_cloud_time = 0.0
         self.cloud_count = 0
@@ -184,10 +195,11 @@ class LiveMapView:
             arr = pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
             res = self.resolution
             new_cells = set()
+            xyz_all = None
             if np is not None and isinstance(arr, np.ndarray):
-                xyz = np.column_stack([arr["x"], arr["y"], arr["z"]])
-                mask = (xyz[:, 2] >= self.z_min) & (xyz[:, 2] <= self.z_max)
-                xyz = xyz[mask]
+                xyz_all = np.column_stack([arr["x"], arr["y"], arr["z"]]).astype(np.float64)
+                # 2D 栅格只要机器人能撞到的高度层，3D 视图用整帧（见 _accumulate_voxels）
+                xyz = xyz_all[(xyz_all[:, 2] >= self.z_min) & (xyz_all[:, 2] <= self.z_max)]
                 if xyz.shape[0]:
                     cols = np.floor(xyz[:, 0] / res).astype(np.int32)
                     rows = np.floor(xyz[:, 1] / res).astype(np.int32)
@@ -201,13 +213,71 @@ class LiveMapView:
                 self.cloud_count += 1
                 if len(self.cells) < self.HARD_CAP_CELLS:
                     self.cells.update(new_cells)
+            self._accumulate_voxels(xyz_all)
         except Exception as exc:
             self.node.get_logger().warning(f"live map cloud error: {exc}", throttle_duration_sec=5.0)
+
+    def _accumulate_voxels(self, xyz):
+        """把整帧点云按体素去重后追加进 3D 缓冲。
+
+        和 2D 栅格不同，这里不做 z 过滤 —— 3D 视图就是要看天花板、
+        货架、桌面这些立体结构，滤掉就退化成平面图了。
+        """
+        if xyz is None or np is None or not len(xyz):
+            return
+        vs = self.voxel_size
+        bias = self._VOXEL_BIAS
+        q = np.floor(xyz / vs).astype(np.int64) + bias
+        if q.min() < 0 or q.max() >= (bias << 1):
+            return   # 坐标离谱，多半是脏数据，整帧丢掉
+        keys = q[:, 0] | (q[:, 1] << 21) | (q[:, 2] << 42)
+        uniq, first_idx = np.unique(keys, return_index=True)
+
+        with self.lock:
+            if len(self._voxel_keys) >= self.HARD_CAP_VOXELS:
+                return
+            known = self._voxel_keys
+            fresh = [(int(k), i) for k, i in zip(uniq.tolist(), first_idx.tolist()) if int(k) not in known]
+            if not fresh:
+                return
+            room = self.HARD_CAP_VOXELS - len(known)
+            fresh = fresh[:room]
+            # 存体素中心，前端拿到就是可直接画的点
+            for key, idx in fresh:
+                known.add(key)
+                px, py, pz = xyz[idx]
+                self._voxel_xyz.append(float((math.floor(px / vs) + 0.5) * vs))
+                self._voxel_xyz.append(float((math.floor(py / vs) + 0.5) * vs))
+                self._voxel_xyz.append(float((math.floor(pz / vs) + 0.5) * vs))
+            zs = xyz[[i for _, i in fresh], 2]
+            lo, hi = float(zs.min()), float(zs.max())
+            self._z_range[0] = lo if self._z_range[0] is None else min(self._z_range[0], lo)
+            self._z_range[1] = hi if self._z_range[1] is None else max(self._z_range[1], hi)
+
+    def cloud_since(self, since=0, max_points=60000):
+        """增量取体素：返回 (float32 小端字节, 本次起始下标, 总数)。
+
+        前端把 since 一路往后推，就能像贴瓷砖一样把点云攒起来，
+        不必每次重传整片地图。
+        """
+        with self.lock:
+            total = len(self._voxel_xyz) // 3
+            since = max(0, min(int(since), total))
+            end = min(total, since + int(max_points))
+            chunk = self._voxel_xyz[since * 3:end * 3]
+            zlo, zhi = self._z_range
+        payload = chunk.tobytes()
+        if sys.byteorder != "little":       # 前端按小端解析
+            payload = array("f", chunk).byteswap().tobytes()
+        return payload, since, end, total, zlo, zhi
 
     def reset(self):
         with self.lock:
             self.cells = set()
             self.cloud_count = 0
+            self._voxel_keys = set()
+            self._voxel_xyz = array("f")
+            self._z_range = [None, None]
         return {"success": True, "message": "实时地图已清空"}
 
     def info(self):
@@ -215,6 +285,8 @@ class LiveMapView:
             count = len(self.cells)
             age = (time.time() - self.last_cloud_time) if self.last_cloud_time else None
             clouds = self.cloud_count
+            voxels = len(self._voxel_xyz) // 3
+            zlo, zhi = self._z_range
         return {
             "topic": self.topic,
             "subscribed": self._sub is not None,
@@ -223,6 +295,10 @@ class LiveMapView:
             "last_cloud_age_sec": round(age, 2) if age is not None else None,
             "streaming": age is not None and age < 3.0,
             "resolution": self.resolution,
+            "voxel_size": self.voxel_size,
+            "voxel_count": voxels,
+            "z_min": zlo,
+            "z_max": zhi,
         }
 
     def render(self, max_dim=900):
@@ -454,7 +530,7 @@ class BridgeNode(Node):
         # ── 建图实时视图：直接吃 super-lio 的世界点云，自己攒栅格 ──
         self.live_map = LiveMapView(
             self, cloud_topic=args.cloud_topic, resolution=args.live_map_resolution,
-            callback_group=self._group,
+            voxel_size=args.live_cloud_voxel, callback_group=self._group,
         )
 
         # ── 相机中继（有 CompressedImage 话题就转发 JPEG，没有就显示占位） ──
@@ -1542,6 +1618,28 @@ def make_handler(node: BridgeNode):
             # ---- 建图实时预览 ----
             if method == "GET" and path == "/api/map/live":
                 return self._send_json(node.live_map.info())
+            if method == "GET" and path == "/api/map/live/cloud":
+                # 3D 点云增量流：body 是裸 float32 小端 xyz 三元组，
+                # 元数据走响应头，前端一次请求就能既拿点又拿游标。
+                since = int(query.get("since", "0") or 0)
+                max_points = max(1, min(200000, int(query.get("max", "60000") or 60000)))
+                payload, start, end, total, zlo, zhi = node.live_map.cloud_since(since, max_points)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Cloud-Start", str(start))
+                self.send_header("X-Cloud-End", str(end))
+                self.send_header("X-Cloud-Total", str(total))
+                self.send_header("X-Cloud-Voxel", str(node.live_map.voxel_size))
+                if zlo is not None:
+                    self.send_header("X-Cloud-Zmin", f"{zlo:.3f}")
+                    self.send_header("X-Cloud-Zmax", f"{zhi:.3f}")
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
             if method == "GET" and path == "/api/map/live/image":
                 png, geometry = node.live_map.render()
                 if png is None:
@@ -1611,6 +1709,8 @@ def parse_args(argv=None):
     parser.add_argument("--camera-topic", default="/camera/color/image_raw/compressed",
                         help="sensor_msgs/CompressedImage 话题；留空关闭相机中继")
     # Nav2 规划路径，画在地图上
+    parser.add_argument("--live-cloud-voxel", type=float, default=0.08,
+                        help="建图 3D 点云的体素边长（米），越小越细但点数涨得快")
     parser.add_argument("--plan-topic", default="/plan",
                         help="nav_msgs/Path 话题，用于在网页地图上画规划路径")
     # 摇杆速度上限

@@ -536,8 +536,22 @@
       </aside>
       ${stickPaneHtml("move")}
       <section class="pane robot-pane work-c" style="background:var(--surface)">
-        <div class="pane-head"><div class="eyebrow">实时地图</div><span class="hint" id="live-map-hint">等待点云…</span></div>
-        <div class="pane-body flush" style="display:flex"><div class="map-wrap" id="live-map"><div class="center-text">等待点云数据…</div></div></div>
+        <div class="pane-head">
+          <div class="eyebrow">实时地图</div>
+          <div class="sb-tabs" id="live-view-tabs">
+            <button class="active" data-live-view="cloud">3D 点云</button>
+            <button data-live-view="grid">2D 栅格</button>
+          </div>
+          <span class="hint" id="live-map-hint">等待点云…</span>
+        </div>
+        <div class="pane-body flush" style="display:flex;position:relative">
+          <div class="cloud-stage" id="live-cloud"></div>
+          <div class="map-wrap" id="live-map" hidden><div class="center-text">等待点云数据…</div></div>
+          <div class="cloud-legend" id="cloud-legend" hidden>
+            <span class="cloud-legend-bar"></span>
+            <span class="cloud-legend-txt"><b id="legend-hi">—</b> 高<br><b id="legend-lo">—</b> 低</span>
+          </div>
+        </div>
       </section>
       <aside class="pane work-d">
         <div class="pane-head"><div class="eyebrow">建图控制</div></div>
@@ -557,11 +571,60 @@
     bind("map-start", "/api/map/start_mapping", "已开始建图");
     bind("map-stop", "/api/map/stop_mapping", "已停止建图，点云保存中");
     bind("map-save", "/api/map/generate_2d", "已触发生成 2D 地图");
-    document.getElementById("live-reset").addEventListener("click", () =>
-      guarded(() => api("/api/map/live/reset", { method: "POST" }), "实时图已清空"));
+    document.getElementById("live-reset").addEventListener("click", async () => {
+      await guarded(() => api("/api/map/live/reset", { method: "POST" }), "实时图已清空");
+      if (mapCloud) mapCloud.clear();
+    });
 
     mountTeleopSticks();
+    startLiveCloud();
     startLiveMapLoop();
+
+    // 3D / 2D 切换：两边都在后台跑，切过去立刻有内容
+    app.querySelectorAll("[data-live-view]").forEach((btn) => btn.addEventListener("click", () => {
+      const mode = btn.getAttribute("data-live-view");
+      app.querySelectorAll("[data-live-view]").forEach((b) => b.classList.toggle("active", b === btn));
+      const cloud = document.getElementById("live-cloud");
+      const grid = document.getElementById("live-map");
+      const legend = document.getElementById("cloud-legend");
+      cloud.hidden = mode !== "cloud";
+      legend.hidden = mode !== "cloud";
+      grid.hidden = mode === "cloud";
+      if (mode === "cloud" && mapCloud) mapCloud.resize();
+    }));
+  }
+
+  // ── 建图 3D 点云 ──
+  let mapCloud = null;
+  function startLiveCloud() {
+    const host = document.getElementById("live-cloud");
+    if (!host || !window.G1MapCloud) return;
+    document.getElementById("cloud-legend").hidden = false;
+    mapCloud = window.G1MapCloud.create(host, {
+      baseUrl: state.baseUrl,
+      onStats: ({ shown, total, zmin, zmax }) => {
+        const hint = document.getElementById("live-map-hint");
+        // 提示条归当前视图用；切到 2D 时别再抢着写点云的数字
+        if (hint && !host.hidden) {
+          hint.textContent = total
+            ? `${shown.toLocaleString()} / ${total.toLocaleString()} 体素 · 高度 ${zmin.toFixed(1)}~${zmax.toFixed(1)} m`
+            : "等待点云…";
+        }
+        const lo = document.getElementById("legend-lo");
+        const hi = document.getElementById("legend-hi");
+        if (lo && total) { lo.textContent = `${zmin.toFixed(1)}m`; hi.textContent = `${zmax.toFixed(1)}m`; }
+      },
+    });
+    if (!mapCloud) return;
+    // 机器人位姿跟着状态轮询走，顺便画出走过的轨迹
+    const poseTimer = setInterval(() => {
+      if (!mapCloud) return;
+      mapCloud.setPose((state.status && state.status.pose) || null);
+    }, 500);
+    onPageLeave(() => {
+      clearInterval(poseTimer);
+      if (mapCloud) { mapCloud.dispose(); mapCloud = null; }
+    });
   }
 
   // 实时地图：每 2 秒拉一张 PNG，几何信息在响应头里，一次请求就够
@@ -579,7 +642,9 @@
         const info = await api("/api/map/live");
         const statusEl = document.getElementById("mapping-status");
         if (statusEl) statusEl.innerHTML = mappingStatusHtml(info);
-        if (hint) {
+        // 提示条归当前显示的那个视图用：3D 时由点云的 onStats 写，别互相覆盖
+        const gridVisible = !document.getElementById("live-map").hidden;
+        if (hint && (gridVisible || !info.streaming)) {
           hint.textContent = info.streaming
             ? `${info.cell_count} 格 · ${info.topic}`
             : `无点云（${info.topic}）`;
