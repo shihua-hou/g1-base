@@ -35,6 +35,27 @@ seed_data() {
     fi
 }
 
+# ── Super-LIO 存图目录改指到数据卷 ──
+# Super-LIO 把地图写到编译期写死的 ROOT/map（见 docker/lio/livox_360.yaml 的注释），
+# 那是镜像里的路径，换个 tag 重建容器地图就没了。
+# 这里把它做成软链指向 $G1_DATA_DIR/lio_map，写的还是原路径，落盘落在卷上。
+link_lio_map_dir() {
+    local lio_root="${LIO_WORKSPACE_ROOT:-/root/lio_ws}/src/Super-LIO/src/super_lio"
+    local link="${lio_root}/map"
+    local target="${G1_DATA_DIR}/lio_map"
+
+    [[ -d "$lio_root" ]] || return 0
+    mkdir -p "$target"
+
+    # 镜像里如果已经是个真目录（上游仓库带了 map/.gitkeep），先搬走里面的东西再换成软链
+    if [[ -d "$link" && ! -L "$link" ]]; then
+        cp -rn "$link/." "$target/" 2>/dev/null || true
+        rm -rf "$link"
+    fi
+    ln -sfn "$target" "$link"
+    echo "[start] Super-LIO 存图目录 ${link} -> ${target}"
+}
+
 run_node() {
     if [[ -f "$G1_LIB/$1" ]]; then
         $PY "$G1_LIB/$1" "${@:2}"
@@ -45,6 +66,7 @@ run_node() {
 }
 
 seed_data
+link_lio_map_dir
 
 echo "[start] ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-unset} RMW=${RMW_IMPLEMENTATION:-unset}"
 echo "[start] 数据目录=${G1_DATA_DIR} 网页端口=${G1_WEB_PORT} 网卡=${G1_NET_IF}"

@@ -29,6 +29,7 @@ load_ros_env
 
 MAPPING_PID=""
 LIVOX_PID=""
+STATIC_TF_PID=""
 CLEANED_UP=0
 
 log() {
@@ -133,12 +134,24 @@ cleanup() {
 
     # 清理其他进程
     stop_process_group "$LIVOX_PID" "livox driver"
+    stop_process_group "$STATIC_TF_PID" "map->world static tf"
 
     wait 2>/dev/null || true
     exit "$exit_code"
 }
 
 trap cleanup EXIT INT TERM
+
+# Super-LIO 发布的点云和 TF 都挂在 "world" 下（ROSWrapper.cpp 里写死，
+# TF 树是 world -> imu）。而网页网关按 ROS 惯例找 "map"，
+# 建图时又还没有 odom_to_tf 来补 map->odom->base_link。
+# 建图期间 world 原点就是地图原点，所以这里补一个恒等静态变换，
+# 网关侧不用改任何参数，3D 点云就能正确落到 map 系。
+log "publishing static TF map -> world (identity)"
+start_in_process_group STATIC_TF_PID \
+    ros2 run tf2_ros static_transform_publisher \
+        --x 0 --y 0 --z 0 --roll 0 --pitch 0 --yaw 0 \
+        --frame-id map --child-frame-id world
 
 log "starting ${LIVOX_PACKAGE} ${LIVOX_LAUNCH}"
 start_in_process_group LIVOX_PID ros2 launch "$LIVOX_PACKAGE" "$LIVOX_LAUNCH"

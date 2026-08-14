@@ -1,0 +1,70 @@
+# Super-LIO 在 G1 上的运行参数（覆盖 Super-LIO 自带的 config/livox_360.yaml）
+#
+# 只改了必要的几项，其余保持上游默认；上游更新时对着 diff 看就行。
+#
+# ── save_map_dir 为什么必须是相对路径 ──
+# ROSWrapper.cpp:26 是 `g_save_map_dir = g_root_dir + g_save_map_dir`，
+# 而 g_root_dir 来自编译期宏 ROOT（= CMAKE_CURRENT_SOURCE_DIR + "/"）。
+# 填绝对路径会拼成 /root/lio_ws/src/Super-LIO/src/super_lio//data/xxx —— 废路径。
+# 所以这里保持 "map"，最终落到
+#     /root/lio_ws/src/Super-LIO/src/super_lio/map/map.pcd
+# 这个目录在 start_g1_base.sh 里被软链到 $G1_DATA_DIR/lio_map，
+# 于是地图实际写进数据卷，换镜像不丢。
+# 顺带一提，start_pc2_mapping.sh 的存图检查用的是同一个路径推导
+# （$(ros2 pkg prefix super_lio)/../../src/Super-LIO/src/super_lio/map），两边一致。
+/**:
+  ros__parameters:
+    # 上游默认 false —— Ctrl+C 时不落盘，建完图直接没了。现场建图必须开。
+    lio.map.save_map: true
+    lio.map.if_filter: true
+    lio.map.save_map_dir: "map"
+    lio.map.map_name: "map.pcd"
+    lio.map.ds_size: 0.25
+    # 每 500 帧落一次盘：中途断电/进程被杀也能留下大部分地图
+    lio.map.save_interval: 500
+
+    lio.ros.lidar_topic: "/livox/lidar"
+    lio.ros.imu_topic: "/livox/imu"
+
+    lio.sensor.lidar_type: 1
+    lio.sensor.blind: 2.0
+    lio.sensor.maxrange: 60.0
+    lio.sensor.filter_rate: 3
+    lio.sensor.enable_downsample: true
+    lio.sensor.voxel_fliter_size: 0.5
+    lio.sensor.gravity_norm: 9.7946
+    lio.sensor.imu_type: 1
+    lio.sensor.imu_na: 0.1
+    lio.sensor.imu_ng: 0.1
+    lio.sensor.imu_nba: 0.0001
+    lio.sensor.imu_nbg: 0.0001
+
+    # 雷达 -> IMU 外参，MID360 内部的固定值，别动
+    lio.extrinsic.lidar_imu: [-0.011, -0.02329, 0.04412,
+                              1.0, 0.0, 0.0,
+                              0.0, 1.0, 0.0,
+                              0.0, 0.0, 1.0]
+    # [x, y, z, roll, pitch, yaw]：LIO 原点 -> 机器人基座。
+    # 全零 = 认为机器人基座就在雷达/IMU 处。
+    # 这一项【不影响建图质量】，只影响 /lio/robo/odom 报出来的位姿原点，
+    # 表现为"机器人在地图里悬空 ~1.1m"。等实测了 MID360 在 G1 上的安装高度再填。
+    lio.extrinsic.odom_robo: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    lio.hash_map.hash_capacity: 2000000
+    lio.hash_map.vox_resolution: 0.5
+
+    lio.kf.kf_type: 0
+    lio.kf.kf_max_iterations: 4
+    lio.kf.kf_align_gravity: true
+    lio.kf.kf_quit_eps: 0.001
+
+    lio.output.robot: true
+    lio.output.plan_env_world: false
+    lio.output.plan_env_body: false
+    lio.output.ml_map: false
+    lio.output.planner: false
+    lio.output.map: true
+    lio.output.dense: true
+    lio.output.pub_step: 1
+
+    lio.eva.timer: true
