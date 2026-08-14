@@ -1,0 +1,46 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "snapshot_duration": 1.0
+  },
+  "steps": [
+    {
+      "type": "snapshot",
+      "path": "snapshots/intro_self.json",
+      "duration": 1,
+      "comment": "中国移动作为....产业链链长.....勇担...重任"
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/question_pose.json",
+      "duration": 1,
+      "comment": "面向大数据....算力与6G"
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/size_large.json",
+      "duration": 1,
+      "comment": "加快培育壮大....产业集群"
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/default_walkrun.json",
+      "duration": 1.3,
+      "comment":"手动归位"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+string waypoint_name
+geometry_msgs/PoseStamped target_pose
+bool align_final_yaw
+---
+bool success
+string status
+string message
+---
+string phase
+float32 distance_to_goal

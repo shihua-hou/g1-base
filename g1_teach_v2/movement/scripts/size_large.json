@@ -1,0 +1,20 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "blend_time": "0.2",
+    "motion_interpolation": "cubic"
+  },
+  "steps": [
+    {
+      "type": "snapshot",
+      "path": "snapshots/size_large.json",
+      "duration": 1.0
+    },
+    {
+      "type": "hold",
+      "duration": 1.5
+    }
+  ]
+}

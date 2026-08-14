@@ -1,0 +1,52 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "snapshot_duration": 1.0
+  },
+  "steps": [
+    {
+      "type": "snapshot",
+      "path": "snapshots/intro_self.json",
+      "duration": 1,
+      "comment": "中国移动"
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/right_hand_upon_head.json",
+      "duration": 1,
+      "comment": "作为。。。。主力军"
+    },
+    {
+      "type": "hold",
+      "duration": 2.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/size_large.json",
+      "duration": 1,
+      "comment": "贡献了诸多移动智慧"
+    },
+    {
+      "type": "hold",
+      "duration": 1.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/point_left.json",
+      "duration": 2,
+      "comment":"下面就用一段短片给....发展情况，此时要指向屏幕"
+    },
+    {
+      "type": "hold",
+      "duration": 1.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/default_walkrun.json",
+      "duration": 2,
+      "comment":"必须要手动归位防止抖动"
+    }
+  ]
+}

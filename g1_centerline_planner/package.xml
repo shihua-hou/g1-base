@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>g1_centerline_planner</name>
+  <version>0.1.0</version>
+  <description>Clearance-aware centerline global planner plugin for Nav2.</description>
+  <maintainer email="lemon@example.com">lemon</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>geometry_msgs</depend>
+  <depend>nav2_core</depend>
+  <depend>nav2_costmap_2d</depend>
+  <depend>nav2_util</depend>
+  <depend>nav_msgs</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2_ros</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+    <nav2_core plugin="${prefix}/plugins.xml"/>
+  </export>
+</package>

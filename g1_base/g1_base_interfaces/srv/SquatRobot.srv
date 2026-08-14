@@ -1,0 +1,5 @@
+string action          # "squat" or "stand_up"
+---
+bool success
+string status
+string message

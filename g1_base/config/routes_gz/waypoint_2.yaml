@@ -1,0 +1,7 @@
+route_name: "default"
+waypoints:
+  - x: 0.21
+    y: -0.12
+    yaw_deg: 180
+    action_id: 31
+    say_text: "到达指定地点"

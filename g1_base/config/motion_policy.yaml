@@ -1,0 +1,59 @@
+motion:
+  # false: only inject vy when a near-front obstacle blocks the path.
+  # true: allow Nav2 planner/smoother to use vy throughout navigation.
+  global_allow_lateral_motion: false
+
+lateral_assist:
+  enabled: false
+  scan_topic: /scan
+  trigger_distance: 2.50
+  clear_distance: 2.70
+  front_half_width: 0.45
+  side_lookahead: 2.80
+  side_min_clearance: 0.55
+  side_band_min: 0.35
+  side_band_max: 1.20
+  vy: 0.22
+  max_forward_vx: 0.15
+  scan_timeout: 0.60
+
+close_obstacle_guard:
+  enabled: true
+  scan_topic: /scan
+  min_range: 0.05
+  trigger_distance: 0.35
+  release_distance: 0.75
+  front_half_width: 0.30
+  # Measured from Livox pillar shadows on PC2: gaps at -48..-40 deg and 42..48 deg.
+  # Use the inner sector with a small margin: about -38..40 deg.
+  front_angle_min: -0.66
+  front_angle_max: 0.70
+  min_points: 3
+  trigger_percentile: 0.10
+  min_consecutive_frames: 2
+  clear_duration: 1.00
+  replan_on_clear: true
+  replan_cooldown: 3.00
+  replan_goal_margin: 0.15
+
+goal_occupancy:
+  enabled: true
+  start_distance: 1.50
+  wait_timeout: 10.00
+  clear_duration: 1.00
+  speak_interval: 4.00
+  costmap_topic: /local_costmap/costmap_raw
+  costmap_timeout: 1.00
+  radius: 0.35
+  cost_threshold: 253
+  min_occupied_cells: 2
+  retry_hold_duration: 6.00
+  retry_window: 5.00
+  max_retries: 2
+
+global_lateral_motion:
+  max_vel_y: 0.0
+  min_vel_y: 0.0
+  vy_samples: 1
+  acc_lim_y: 0.0
+  decel_lim_y: 0.0

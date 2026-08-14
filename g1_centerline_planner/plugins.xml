@@ -1,0 +1,10 @@
+<library path="g1_centerline_planner">
+  <class
+    name="g1_centerline_planner/CenterlinePlanner"
+    type="g1_centerline_planner::CenterlinePlanner"
+    base_class_type="nav2_core::GlobalPlanner">
+    <description>
+      Clearance-aware 2D A* planner with centerline bias and line-of-sight shortcutting.
+    </description>
+  </class>
+</library>

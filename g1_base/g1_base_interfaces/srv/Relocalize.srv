@@ -1,0 +1,8 @@
+float64 x
+float64 y
+float64 yaw
+float64 duration_sec
+float64 rate_hz
+---
+bool success
+string message

@@ -1,0 +1,67 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "snapshot_duration": 1.0
+  },
+  "steps": [
+    {
+      "type": "hold",
+      "duration": 3.0,
+      "comment": "保持默认位置"
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/point_front.json",
+      "duration": 1.3,
+      "comment": "指向前方视觉上形成“推动”效果，要在“推动智算中心更快发展”的时候做这个动作”"
+    },
+    
+    {
+      "type": "snapshot",
+      "path": "snapshots/right_hand_upon_head.json",
+      "duration": 1.3,
+      "comment": "右手抬过头顶，“伴随芯片功率密度持续攀升”"
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+
+    {
+      "type": "snapshot",
+      "path": "snapshots/default_walkrun.json",
+      "duration": 1.3
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/question_pose.json",
+      "duration": 1.3,
+      "comment": "举例：各位领导所熟知"
+    },
+    {
+    "type": "hold",
+    "duration": 1.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/size_large.json",
+      "duration": 1.3,
+      "comment": "这里做一个表示耗电量很大的动作，配合“日耗电量超过50晚读....家庭的日耗电量”这个话术"
+    },
+    {
+    "type": "hold",
+    "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/default_walkrun.json",
+      "duration": 1.3
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+# G1 底座 + 网页控制台
+#
+#   docker compose up -d          启动
+#   docker compose logs -f        看日志
+#   docker compose down           停止
+#
+# 换版本 = 改 G1_IMAGE_TAG 后 up -d，回滚同理（秒级，旧镜像还在本地）。
+services:
+  g1-base:
+    image: "g1-base:${G1_IMAGE_TAG:-dev}"
+    container_name: g1-base
+    restart: unless-stopped
+
+    # ROS2 的 DDS 要在宿主网络上做节点发现；网页端口也随之直接落在机器人 IP 上，
+    # 所以不需要 ports 映射。桥接网络会让容器内外互相发现不到。
+    network_mode: host
+
+    # Unitree SDK 要直接访问网卡；MID360 等设备也走宿主
+    privileged: true
+
+    environment:
+      # 必填：CycloneDDS 绑定哪张网卡。基础镜像的 entrypoint 据此生成配置，
+      # 不设会警告并可能选错网卡，表现为"话题时有时无"。
+      G1_DDS_INTERFACES: "${G1_NET_IF:-enP8p1s0}"
+      # 网页网关显示用的网卡与端口
+      G1_NET_IF: "${G1_NET_IF:-enP8p1s0}"
+      G1_WEB_PORT: "${G1_WEB_PORT:-8080}"
+      # 运行时可写数据落到数据卷
+      G1_DATA_DIR: /data
+
+    volumes:
+      # 现场数据：建的图、存的路线、行走参数。容器重建靠它保命。
+      - ${G1_DATA_HOST_DIR:-/data/g1}:/data
+      # 日志留在宿主机，方便 tail 和收集
+      - ${G1_LOG_HOST_DIR:-/data/g1_logs}:/root/logs
+      # 时间对齐，日志时间戳才有意义
+      - /etc/localtime:/etc/localtime:ro
+
+    # 容器里跑 ROS2 + Nav2，默认 64MB 的 /dev/shm 不够 DDS 用
+    shm_size: "512m"
+
+    stop_grace_period: 20s

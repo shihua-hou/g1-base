@@ -1,0 +1,22 @@
+{
+    "kind": "script",
+    "version": 1,
+    "defaults": {
+        "profile": "upper_waist_lock",
+        "snapshot_duration": 1.0
+    },
+    "steps": [
+        {
+            "type": "audio",
+            "path": "../music/haorizi.wav",
+            "delay": 5.5,
+            "async": true,
+            "stream_name": "music",
+            "volume": 100
+        },
+        {
+            "type": "motion",
+            "path": "motions/haorizi06.jsonl"
+        }
+    ]
+}

@@ -1,0 +1,40 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "snapshot_duration": 1.5,
+    "motion_speed": 1.0,
+    "hand_duration": 0.35
+  },
+  "steps": [
+    {
+      "type": "snapshot",
+      "path": "snapshots/explain_ready.json",
+      "duration": 1.5
+    },
+    {
+      "type": "hand",
+      "preset": "count_1",
+      "duration": 0.35
+    },
+    {
+      "type": "hold",
+      "duration": 0.8
+    },
+    {
+      "type": "hand",
+      "preset": "count_2",
+      "duration": 0.35
+    },
+    {
+      "type": "hold",
+      "duration": 0.8
+    },
+    {
+      "type": "hand",
+      "preset": "count_3",
+      "duration": 0.35
+    }
+  ]
+}

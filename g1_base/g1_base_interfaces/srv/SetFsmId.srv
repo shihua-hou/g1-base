@@ -1,0 +1,6 @@
+int32 fsm_id          # 目标 FSM ID
+---
+bool success
+string status
+string message
+int32 return_code     # 底层 SDK SetFsmId 返回码

@@ -1,0 +1,14 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_waist_lock",
+    "snapshot_duration": 1.0
+  },
+  "steps": [
+    {
+      "type": "motion",
+      "path": "motions/chinese_07.jsonl"
+    }
+  ]
+}

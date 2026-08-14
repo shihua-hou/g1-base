@@ -1,0 +1,7 @@
+route_name: "default"
+waypoints:
+  - x: 3.12
+    y: -9.65
+    yaw_deg: 180
+    action_id: 31
+    say_text: "到达党建和创讲解点"

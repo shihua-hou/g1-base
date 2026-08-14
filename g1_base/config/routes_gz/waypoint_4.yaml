@@ -1,0 +1,17 @@
+route_name: "default"
+waypoints:
+  - x: 3.12
+    y: -9.65
+    yaw_deg: 180
+    action_id: 31
+    say_text: "到达一号讲解点"
+  - x: 0.21
+    y: -0.12
+    yaw_deg: 180
+    action_id: 31
+    say_text: "到达二号讲解点。准备返回一号讲解点"
+  - x: 3.12
+    y: -9.65
+    yaw_deg: 180
+    action_id: 31
+    say_text: "到达一号讲解点"

@@ -1,0 +1,67 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "snapshot_duration": 1.0
+  },
+  "steps": [
+    {
+      "type": "hold",
+      "duration": 3.0,
+      "comment": "先保持不动"
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/size_small.json",
+      "duration": 1.3,
+      "comment": "说到“为一体”的时候刚好做到这个动作"
+    },
+    {
+      "type": "hold",
+      "duration": 2.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/default_walkrun.json",
+      "duration": 1.3,
+      "comment": "手动归位"
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/point_front.json",
+      "duration": 1.3,
+      "comment": "说到“推动经济社会的数字化转型”时正好指向前方，以这个动作表示“推动”"
+    },
+    {
+    "type": "hold",
+    "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/question_pose.json",
+      "duration": 1.3,
+      "comment": "说到“首次提出”的时候右手可以做个提出的动作"
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/welcome_open_arms.json",
+      "duration": 1.3,
+      "comment": "说到“同年8月” 这个时候执行这个动作会把左手也抬上来"
+    },
+    {
+    "type": "hold",
+    "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/default_walkrun.json",
+      "duration": 1.3,
+      "comment": "讲完后,手动归位"
+    }
+  ]
+}

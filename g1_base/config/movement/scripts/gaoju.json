@@ -1,0 +1,25 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "blend_time": "0.2",
+    "motion_interpolation": "cubic"
+  },
+  "steps": [
+    {
+      "type": "snapshot",
+      "path": "snapshots/gaoju.json",
+      "duration": 2
+    },
+    {
+      "type": "hold",
+      "duration": 2.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/default.json",
+      "duration": 2
+    }
+  ]
+}

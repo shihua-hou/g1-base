@@ -1,0 +1,6 @@
+float32 angle_deg
+float32 speed_scale
+---
+bool success
+string status
+string message

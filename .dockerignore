@@ -1,0 +1,30 @@
+# 构建上下文只需要源码。构建产物一定要排除：
+# 开发机上的 build/install 是另一套架构 / 另一套路径，混进镜像会编出诡异的结果。
+**/build/
+**/install/
+**/log/
+**/__pycache__/
+**/*.pyc
+**/*.egg-info/
+**/.pytest_cache/
+
+.git/
+.gitignore
+.idea/
+.vscode/
+**/.DS_Store
+
+# 文档和容器配置本身不进镜像
+doc/
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 出厂地图要留在镜像里：容器首启会把它播种到数据卷，
+# 否则新装的机器人一张图都没有，导航直接不可用。
+# 之后现场建的图存在数据卷，镜像更新不会覆盖。
+# 只排掉纯开发用的东西：
+g1_base/memory/
+g1_base/sdk_test/
+g1_base/tests/
+g1_base/test/

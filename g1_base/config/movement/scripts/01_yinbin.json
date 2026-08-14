@@ -1,0 +1,36 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "snapshot_duration": 1.0
+  },
+  "steps": [
+    {
+      "type": "script",
+      "path": "scripts/show.json",
+      "comment": "甘肃5G联合创新中心"
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/size_large.json",
+      "duration": 1,
+      "comment": "升级后面积约为2400m²"
+      
+    },
+    {
+      "type": "hold",
+      "duration": 1.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/default_walkrun.json",
+      "duration": 1.3,
+      "comment":"手动归位"
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "snapshot_duration": 1.0
+  },
+  "steps": [
+    {
+      "type": "snapshot",
+      "path": "snapshots/hands_on_waist.json",
+      "duration": 1.3,
+      "comment": "在时空隧道中"
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/hands_on_chest_open.json",
+      "duration": 1.3,
+      "comment":"快速发展"
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/right_hand_upon_head.json",
+      "duration": 1.3,
+      "comment": "垂直地面1000米"
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/size_large.json",
+      "duration": 1.3,
+      "comment":"拓展到3000米"
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+
+    {
+      "type": "snapshot",
+      "path": "snapshots/point_left.json",
+      "duration": 1.3,
+      "comment": "说到以各种有人驾驶....航空器,当说到航空器的时候应当正好指向航空器，这里需要实际去调整机器人站位角度"
+    },
+    {
+    "type": "hold",
+    "duration": 3.0,
+    "comment":"此处可以保持指向，若不需要可删除，时间根据实际情况调整"
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/default_walkrun.json",
+      "duration": 1.3
+    }
+  ]
+}

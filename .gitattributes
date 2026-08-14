@@ -1,0 +1,26 @@
+# Windows 上开发、Linux 容器里运行：行尾必须钉死成 LF。
+# 否则 checkout 出来的 .sh 带 CRLF，容器里直接报
+#   bash: /start_g1_base.sh: /bin/bash^M: bad interpreter: No such file or directory
+* text=auto eol=lf
+
+*.sh      text eol=lf
+*.py      text eol=lf
+*.bash    text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.json    text eol=lf
+*.jsonl   text eol=lf
+*.js      text eol=lf
+*.css     text eol=lf
+*.html    text eol=lf
+*.xml     text eol=lf
+*.md      text eol=lf
+Dockerfile text eol=lf
+
+# 二进制别碰
+*.bin     binary
+*.pcd     binary
+*.pgm     binary
+*.wav     binary
+*.png     binary
+*.jpg     binary

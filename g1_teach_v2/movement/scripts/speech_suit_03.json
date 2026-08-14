@@ -1,0 +1,38 @@
+{
+  "kind": "script",
+  "version": 1,
+  "defaults": {
+    "profile": "upper_playback",
+    "snapshot_duration": 1.0
+  },
+  "steps": [
+    {
+      "type": "snapshot",
+      "path": "snapshots/hands_on_waist.json",
+      "duration": 1.5
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/hands_before_chest_open.json",
+      "duration": 1.3
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    },
+    {
+      "type": "snapshot",
+      "path": "snapshots/hands_on_chest_open.json",
+      "duration": 1.3
+    },
+    {
+      "type": "hold",
+      "duration": 3.0
+    }
+    
+  ]
+}

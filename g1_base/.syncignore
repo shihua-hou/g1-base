@@ -1,0 +1,59 @@
+# ===== From .gitignore =====
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VS Code
+.vscode/
+
+# ROS / catkin / logs
+build/
+devel/
+install/
+log/
+logs/
+
+# Environment
+.env
+venv/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+.codex
+
+# ===== Sync-specific exclusions =====
+
+# Git metadata (no need to sync git history)
+.git/
+
+# AI assistant configs
+.claude/
+.gemini/
+CLAUDE.md
+
+# Pytest cache
+.pytest_cache/
+
+# Log files
+*.log
+
+# Sync script itself
+sync_to_bot_mind.bash
+.syncignore
+
+# sync to bot_mind
+
+DEPLOY.md
+new_readme.md
+PARAMETERS.md
+ROS1-DEPLOY.md
+ros2_step_by_step.md
+.gitignore
+readme.md

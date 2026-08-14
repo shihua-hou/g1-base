@@ -1,0 +1,27 @@
+{
+  "_doc": "预设动作配置。duration_sec: 发出 ExecuteAction 后等待的固定时长（秒），超时即返回，不再等 SDK 阻塞。",
+
+  "99":  { "name": "release_arm",                  "duration_sec": 2.0 },
+  "1":   { "name": "turn_back_wave",               "duration_sec": 2.0 },
+  "11":  { "name": "blow_kiss_with_both_hands",     "duration_sec": 2.0 },
+  "12":  { "name": "blow_kiss_with_left_hand",      "duration_sec": 2.0 },
+  "13":  { "name": "blow_kiss_with_right_hand",     "duration_sec": 2.0 },
+  "15":  { "name": "both_hands_up",                 "duration_sec": 2.0 },
+  "17":  { "name": "clap",                          "duration_sec": 4.0 },
+  "18":  { "name": "high_five",                     "duration_sec": 2.0 },
+  "19":  { "name": "hug",                           "duration_sec": 2.0 },
+  "20":  { "name": "make_heart_with_both_hands",    "duration_sec": 2.0 },
+  "21":  { "name": "make_heart_with_right_hand",    "duration_sec": 2.0 },
+  "22":  { "name": "refuse",                        "duration_sec": 2.0 },
+  "23":  { "name": "right_hand_up",                 "duration_sec": 2.0 },
+  "24":  { "name": "ultraman_ray",                  "duration_sec": 2.0 },
+  "25":  { "name": "wave_under_head",               "duration_sec": 2.0 },
+  "26":  { "name": "wave_above_head",               "duration_sec": 2.0 },
+  "27":  { "name": "shake_hand",                    "duration_sec": 2.0 },
+  "28":  { "name": "box_left_hand_win",             "duration_sec": 2.0 },
+  "29":  { "name": "box_right_hand_win",            "duration_sec": 2.0 },
+  "30":  { "name": "box_both_hand_win",             "duration_sec": 2.0 },
+  "33":  { "name": "right_hand_on_heart",           "duration_sec": 2.0 },
+  "34":  { "name": "both_hands_up_deviate_right",   "duration_sec": 2.0 },
+  "36":  { "name": "forward_push",                  "duration_sec": 2.0 }
+}

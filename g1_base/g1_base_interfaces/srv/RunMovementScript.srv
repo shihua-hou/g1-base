@@ -1,0 +1,5 @@
+string script_path
+---
+bool success
+string status
+string message

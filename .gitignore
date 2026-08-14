@@ -1,0 +1,26 @@
+# ── 构建产物 ──
+build/
+install/
+log/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# ── 编辑器 / 系统 ──
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ── 运行时状态 ──
+# 注意：只排"机器人跑起来之后才产生的状态"。
+# 出厂地图（config/maps、config/halls 下的 pgm/yaml/pcd）必须留在仓库里 ——
+# Jetson 是 git clone 拿代码再 docker build 的，仓库里没有的东西
+# 镜像里就没有，现场装完会一张图都没有。
+g1_base/config/maps/current_map.json
+g1_base/memory/
+
+# 现场新建的地图快照存在数据卷（G1_DATA_DIR），不回流到源码树；
+# 万一手工拷进来了，用下面这行挡一下（按需取消注释并改成实际前缀）：
+# g1_base/config/maps/20*_*

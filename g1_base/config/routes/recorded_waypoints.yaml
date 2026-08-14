@@ -1,0 +1,92 @@
+route_name: "default"
+waypoints:
+  - x: -0.055
+    y: -0.084
+    yaw_deg: -0.441
+    action_id: 31
+    say_text: "定位区"
+  - x: -5.439
+    y: 0.606
+    yaw_deg: -123.036
+    action_id: 31
+    say_text: "欢迎区"
+  - x: 4.123
+    y: 1.431
+    yaw_deg: -100.121
+    action_id: 31
+    say_text: "品牌区"
+  - x: 1.423
+    y: 7.074
+    yaw_deg: -64.2
+    action_id: 31
+    say_text: "我们的故事区" 
+  - x: 12.384
+    y: 1.122
+    yaw_deg: 109.401
+    action_id: 31
+    say_text: "全球布局区"
+  - x: 9.565
+    y: -0.943
+    yaw_deg: -1.233
+    action_id: 31
+    say_text: "鲸智大模型技术体系"
+  - x: 9.862
+    y: -5.135
+    yaw_deg: 51.815
+    action_id: 31
+    say_text: "企业数据治理体系"
+  - x: 17.269
+    y: -2.195
+    yaw_deg: -113.974
+    action_id: 31
+    say_text: "鲸智百应"
+  - x: 19.536
+    y: -3.89
+    yaw_deg: -141.417
+    action_id: 31
+    say_text: "鲸智百应互动体验"
+  - x: 19.674
+    y: -6.546
+    yaw_deg: 138.669
+    action_id: 31
+    say_text: "鲸智百应智能体应用"
+  - x: 18.95
+    y: -11.285
+    yaw_deg: 144.673
+    action_id: 31
+    say_text: "国内运营商解决方方案全景图"
+  - x: 16.379
+    y: -12.208
+    yaw_deg: 93.309
+    action_id: 31
+    say_text: "国内运营商数智化能力"
+  - x: 11.402
+    y: -12.541
+    yaw_deg: 68.89
+    action_id: 31
+    say_text: "海外市场成功故事"
+  - x: 7.998
+    y: -12.32
+    yaw_deg: 52.934
+    action_id: 31
+    say_text: "海外市场数智化能力"
+  - x: 3.117
+    y: -12.485
+    yaw_deg: 67.88
+    action_id: 31
+    say_text: "行业数字化能力体系"
+  - x: 0.671
+    y: -12.027
+    yaw_deg: 40.703
+    action_id: 31
+    say_text: "行业数字化转型实践"
+  - x: 0.612
+    y: -8.308
+    yaw_deg: 134.914
+    action_id: 31
+    say_text: "AI硬件"
+  - x: 5.042
+    y: -7.945
+    yaw_deg: -87.853
+    action_id: 31
+    say_text: "拍照互动区"

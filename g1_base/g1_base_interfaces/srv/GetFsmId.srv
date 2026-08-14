@@ -1,0 +1,5 @@
+---
+bool success
+string status
+string message
+int32 fsm_id          # 当前 FSM ID

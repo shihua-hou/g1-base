@@ -1,0 +1,90 @@
+# G1 行走模式配置
+# mode: "locked_waist" (固定腰部) | "unlocked_waist" (解开腰部)
+walking_mode: unlocked_waist
+
+locked_waist:
+  # SDK 速度档位: 0=1.0m/s, 1=2.0m/s, 2=2.7m/s, 3=3.0m/s
+  speed_mode: 0 
+  # 手动移动线速度 (move_robot 服务)
+  linear_speed: 0.35
+  # 导航 profile: 快速巡航
+  fast_max_vel_x: 1.3
+  fast_max_vel_theta: 1.2
+  fast_acc_lim_x: 2.0
+  fast_acc_lim_theta: 1.0
+  # 导航 profile: 精准调整
+  slow_max_vel_x: 0.65
+  slow_max_vel_theta: 0.8
+  slow_acc_lim_x: 0.5
+  slow_acc_lim_theta: 0.8
+  # 命令平滑斜率限制 (每控制周期最大变化量)
+  max_cmd_step_vx: 0.10
+  max_cmd_step_vy: 0.05
+  max_cmd_step_wz: 0.15
+  # 最小前向速度钳制
+  min_vx_threshold: 0.25
+  min_vx_bypass_wz: 0.25
+  # 手动转弯参数
+  rotate_wz_base: 0.785  # radians(45)
+  rotate_wz_min: 0.2
+  rotate_wz_max: 1.2
+  # 手动移动安全余量时间 (秒)
+  move_deadline_margin: 2.0
+  rotate_deadline_margin: 1.0
+  # 旋转恢复参数
+  rotate_recovery_min_wz: 0.2
+  rotate_recovery_max_wz: 1.0
+  rotate_recovery_gain: 2.5
+
+unlocked_waist: # 解锁腰部的常规模式
+  speed_mode: 2
+  # 解开腰部执行效率低，需要更大的指令速度才能实际走动
+  linear_speed: 0.35
+  fast_max_vel_x: 1.95
+  fast_max_vel_theta: 1.5
+  fast_acc_lim_x: 2.5
+  fast_acc_lim_theta: 1.2
+  slow_max_vel_x: 0.98
+  slow_max_vel_theta: 1.0
+  slow_acc_lim_x: 0.8
+  slow_acc_lim_theta: 1.0
+  max_cmd_step_vx: 0.15
+  max_cmd_step_vy: 0.08
+  max_cmd_step_wz: 0.20
+  min_vx_threshold: 0.25
+  min_vx_bypass_wz: 0.30
+  rotate_wz_base: 0.785
+  rotate_wz_min: 0.5
+  rotate_wz_max: 1.5
+  move_deadline_margin: 1.0
+  rotate_deadline_margin: 2.0
+  rotate_recovery_min_wz: 0.3
+  rotate_recovery_max_wz: 1.2
+  rotate_recovery_gain: 3.0
+
+
+# unlocked_waist: 解锁腰部的走跑模式
+#   speed_mode: 1
+#   # 解开腰部执行效率低，需要更大的指令速度才能实际走动
+#   linear_speed: 0.45
+#   fast_max_vel_x: 1.95
+#   fast_max_vel_theta: 1.5
+#   fast_acc_lim_x: 2.5
+#   fast_acc_lim_theta: 1.2
+#   slow_max_vel_x: 0.98
+#   slow_max_vel_theta: 1.0
+#   slow_acc_lim_x: 0.8
+#   slow_acc_lim_theta: 1.0
+#   max_cmd_step_vx: 0.15
+#   max_cmd_step_vy: 0.08
+#   max_cmd_step_wz: 0.20
+#   min_vx_threshold: 0.25
+#   min_vx_bypass_wz: 0.30
+#   rotate_wz_base: 1.25
+#   rotate_wz_min: 1.0
+#   rotate_wz_max: 1.75
+#   move_deadline_margin: 1.0
+#   rotate_deadline_margin: 2.0
+#   rotate_recovery_min_wz: 0.3
+#   rotate_recovery_max_wz: 1.2
+#   rotate_recovery_gain: 3.0

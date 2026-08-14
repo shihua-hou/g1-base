@@ -1,0 +1,142 @@
+[
+  {
+    "type": "action_name",
+    "title": "第三方自定义动作",
+    "actions": [
+      {
+        "actionName": "demo_hand_count",
+        "comment": "演示动作：手势数数 1-2-3"
+      },
+      {
+        "actionName": "intro_self",
+        "comment": "自我介绍姿态定格"
+      },
+      {
+        "actionName": "point_front",
+        "comment": "手指指向正前方"
+      },
+      {
+        "actionName": "point_left",
+        "comment": "手指指向左侧并回归默认"
+      },
+      {
+        "actionName": "point_right",
+        "comment": "手指指向右侧并回归默认"
+      },
+      {
+        "actionName": "question_pose",
+        "comment": "疑问姿势定格后回归默认"
+      },
+      {
+        "actionName": "show",
+        "comment": "展示姿势：双手胸前展开"
+      },
+      {
+        "actionName": "size_large",
+        "comment": "比划大尺寸手势并回归默认"
+      },
+      {
+        "actionName": "size_small",
+        "comment": "比划小尺寸手势并回归默认"
+      },
+      {
+        "actionName": "speech_suit_01",
+        "comment": "演讲套装01：叉腰→胸前展开→头顶→默认"
+      },
+      {
+        "actionName": "speech_suit_02",
+        "comment": "演讲套装02：胸前展开→手心朝上→叉腰"
+      },
+      {
+        "actionName": "speech_suit_03",
+        "comment": "演讲套装03：演讲配套手势组合"
+      },
+      {
+        "actionName": "welcome_open_arms",
+        "comment": "欢迎姿势：双臂张开迎接"
+      }
+    ]
+  },
+  {
+    "type": "app_action",
+    "title": "APP 动作",
+    "actions": [
+      {
+        "actionName": "release_arm",
+        "comment": "id:99_恢复初始手臂位姿"
+      },
+      {
+        "actionName": "two_hand_kiss",
+        "comment": "id:11_双手飞吻"
+      },
+      {
+        "actionName": "single_kiss",
+        "comment": "id:12_单手飞吻"
+      },
+      {
+        "actionName": "right_kiss",
+        "comment": "id:13_右手飞吻"
+      },
+      {
+        "actionName": "hands_up",
+        "comment": "id:15_平举"
+      },
+      {
+        "actionName": "clap",
+        "comment": "id:17_鼓掌"
+      },
+      {
+        "actionName": "high_five",
+        "comment": "id:18_击掌"
+      },
+      {
+        "actionName": "hug",
+        "comment": "id:19_拥抱"
+      },
+      {
+        "actionName": "double_heart",
+        "comment": "id:20_双手比心"
+      },
+      {
+        "actionName": "right_heart",
+        "comment": "id:21_右手比心"
+      },
+      {
+        "actionName": "reject",
+        "comment": "id:22_双手打X"
+      },
+      {
+        "actionName": "right_hand_up",
+        "comment": "id:23_右手平举"
+      },
+      {
+        "actionName": "x_ray",
+        "comment": "id:24_动感光波"
+      },
+      {
+        "actionName": "chest_wave",
+        "comment": "id:25_胸前挥手"
+      },
+      {
+        "actionName": "high_wave",
+        "comment": "id:26_高举挥手"
+      },
+      {
+        "actionName": "shake_hand",
+        "comment": "id:27_握手"
+      },
+      {
+        "actionName": "welcome_broadcast",
+        "comment": "APP 端录制欢迎语"
+      },
+      {
+        "actionName": "light_strip_toggle",
+        "comment": "APP 端录制灯带控制"
+      },
+      {
+        "actionName": "guide_gesture",
+        "comment": "APP 端录制引导动作"
+      }
+    ]
+  }
+]

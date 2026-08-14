@@ -1,0 +1,21 @@
+# Test cases for g1_base/local_plan_test.py.
+#
+# Coordinates are in the map frame. These defaults are selected from free-space
+# runs in config/maps/exhibit_2d_map.pgm and are meant as smoke tests. For the
+# exact RViz corridor case, add more cases here after reading coordinates in RViz.
+
+tests:
+  - name: upper_horizontal_hall
+    description: "Long free-space run across the upper hall."
+    start: {x: -20.0, y: 11.8, yaw: 0.0}
+    goal:  {x:  -5.0, y: 11.8, yaw: 0.0}
+
+  - name: right_vertical_hall
+    description: "Vertical hall segment useful for checking centerline behavior."
+    start: {x: -2.2, y: -4.0, yaw: 1.57}
+    goal:  {x: -2.2, y:  8.5, yaw: 1.57}
+
+  - name: mid_vertical_hall
+    description: "Another vertical free-space run through the map."
+    start: {x: -12.8, y: -1.0, yaw: 1.57}
+    goal:  {x: -12.8, y: 11.5, yaw: 1.57}

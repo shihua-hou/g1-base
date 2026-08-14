@@ -1,0 +1,7 @@
+string direction
+float32 distance_m
+float32 speed_scale
+---
+bool success
+string status
+string message
