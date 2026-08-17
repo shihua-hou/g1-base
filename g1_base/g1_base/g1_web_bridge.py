@@ -230,6 +230,9 @@ class LiveMapView:
         self.ground_radius = 6.0
         # 雷达装机高度（米，卷尺实测）。地面 = 机器人当前 z - 这个值。
         self.lidar_height = 0.0
+        # 允许低于地面多少米。留 0.3 是给地面本身的起伏和 LIO 的 z 噪声，
+        # 再低就只可能是镜面倒影了。
+        self.below_ground_tol = 0.3
         self.lock = threading.Lock()
         self.last_cloud_time = 0.0
         self.cloud_count = 0
@@ -356,7 +359,13 @@ class LiveMapView:
         """
         if xyz is None or np is None or not len(xyz):
             return
-        keep = (xyz[:, 2] >= self.voxel_z_min) & (xyz[:, 2] <= self.voxel_z_max)
+        # 地板以下的点物理上不存在，全是抛光地面的镜面倒影（实测占 25%，
+        # 位置在雷达关于地面的镜像处）。它们既污染高度配色，又白占体素预算。
+        lo = self.voxel_z_min
+        ground_z = self.ground_level()
+        if ground_z is not None:
+            lo = max(lo, ground_z - self.below_ground_tol)
+        keep = (xyz[:, 2] >= lo) & (xyz[:, 2] <= self.voxel_z_max)
         n_drop = int(len(xyz) - int(keep.sum()))
         if n_drop:
             with self.lock:
@@ -1196,6 +1205,10 @@ def halls_dir():
     return Path(package_share_dir()) / "config" / "halls"
 
 
+# 雷达装机高度（米）。main() 按 --lidar-height 覆盖。
+# save_live_map 是模块级函数，拿不到 node.args，只能走这里。
+_LIDAR_HEIGHT = 1.28
+
 # 地图名允许的字符：要当文件名用，也要能安全塞进 URL
 _MAP_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,48}$")
 
@@ -1258,6 +1271,8 @@ def save_live_map(name):
             pcd_path=str(pcd_target),
             output_dir=str(maps_dir),
             output_name=f"{name}_{MAP_NAME_SUFFIX}",
+            # 没有这个先验的话，抛光地面的镜像层会把地面拟合拽低一个雷达高度
+            lidar_height=_LIDAR_HEIGHT,
         )
     except TiltedWorldError as exc:
         pcd_target.unlink(missing_ok=True)
@@ -2147,6 +2162,8 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args, ros_args = parse_args(argv)
+    global _LIDAR_HEIGHT
+    _LIDAR_HEIGHT = float(args.lidar_height)
     rclpy.init(args=ros_args)
     node = BridgeNode(args)
     executor = MultiThreadedExecutor(num_threads=4)

@@ -47,6 +47,16 @@ GROUND_MIN_INLIER_RATIO = 0.45
 # 远场坏点，杠杆又长 —— 35m 外差 3.8m 就能把平面撬起 6°。
 # 近场地面点又准又密，够拟合了。0 表示不限制。
 GROUND_CHECK_MAX_RADIUS_M = 20.0
+# 地面先验的搜索带宽（米）。给了先验就只在 [先验-带宽, 先验+带宽] 里挑候选点。
+#
+# 为什么需要先验：候选点取的是"每格最低点"，而抛光地面的镜面反射会在地板
+# 下方造出一整层倒影 —— 实测占全部点的 25%，位置正好是雷达关于地面的镜像
+# （地面 -1.28，倒影 -2.55 ≈ -1.28×2）。它自己也是个平面，RANSAC 拟合得
+# 又稳又准（内点率 70%、残差 0.016m、倾斜 0.7°），看起来毫无问题，
+# 实际整整低了 1.27m，障碍带跟着偏，存出来的图没法用。
+# 密度也救不了：倒影 25% 比真地面 5.7% 还多（镜面把光弹走了，真地面回波反而弱）。
+# 所以只能靠外部先验锚定 —— 雷达装机高度卷尺一量就准。
+GROUND_PRIOR_BAND_M = 0.5
 DEFAULT_OBSTACLE_MIN_HEIGHT = 0.15
 DEFAULT_OBSTACLE_MAX_HEIGHT = 1.6
 # 离地 ±这个厚度内的点算"看到了地板"，据此标出可通行区域。
@@ -211,6 +221,8 @@ def validate_ground_alignment(
     cell_size=GROUND_CHECK_CELL_SIZE_M,
     max_tilt_deg=MAX_WORLD_TILT_DEG,
     max_radius_m=GROUND_CHECK_MAX_RADIUS_M,
+    ground_prior_z=None,
+    prior_band=GROUND_PRIOR_BAND_M,
 ):
     if np is None:
         raise ImportError("numpy 未安装，请运行: pip3 install numpy")
@@ -227,12 +239,20 @@ def validate_ground_alignment(
 
     # 拟合地面只用近场点，远场掠射点误差被距离放大（见 GROUND_CHECK_MAX_RADIUS_M）。
     # 注意只影响"拟合"，高度过滤和投影仍然用全部点，地图范围不会被裁掉。
-    fit_src = xyz
+    # 两道筛选叠加成一个掩码，别互相覆盖
+    keep = np.ones(len(xyz), dtype=bool)
+    # ① 先验：把地板下方的镜像层挡在外面（见 GROUND_PRIOR_BAND_M）
+    if ground_prior_z is not None:
+        band = np.abs(xyz[:, 2] - float(ground_prior_z)) <= float(prior_band)
+        if int(band.sum()) >= 64:      # 带内点太少多半是先验给错了，那就不用它
+            keep &= band
+    # ② 近场：远场掠射点误差被距离放大（见 GROUND_CHECK_MAX_RADIUS_M）
     if max_radius_m and float(max_radius_m) > 0.0:
         center = np.median(xyz[:, :2], axis=0)
         near = np.linalg.norm(xyz[:, :2] - center, axis=1) <= float(max_radius_m)
-        if int(near.sum()) >= 32:      # 近场点太少就退回用全部，总比拟合不出来强
-            fit_src = xyz[near]
+        if int((keep & near).sum()) >= 32:
+            keep &= near
+    fit_src = xyz[keep] if int(keep.sum()) >= 3 else xyz
 
     cells = np.floor(fit_src[:, :2] / float(cell_size)).astype(np.int64)
     order = np.lexsort((fit_src[:, 2], cells[:, 1], cells[:, 0]))
@@ -324,6 +344,7 @@ def convert_pcd_to_2d_map(
     padding=1.0,
     ground_band=DEFAULT_GROUND_BAND,
     free_fill_px=DEFAULT_FREE_FILL_PX,
+    lidar_height=None,
 ):
     """将 3D PCD 点云转换为 2D 占据栅格地图。
 
@@ -356,7 +377,11 @@ def convert_pcd_to_2d_map(
     if total_points == 0:
         raise ValueError(f"PCD 文件为空: {pcd_path}")
 
-    alignment = validate_ground_alignment(xyz)
+    # 雷达装机高度是卷尺量得准的物理常数，而 LIO 世界原点就在起始时刻的雷达上，
+    # 所以地面先验就是 -lidar_height。没有它，抛光地面的镜像层会把地面拟合
+    # 整整拽低一个雷达高度（见 GROUND_PRIOR_BAND_M）。
+    prior = None if not lidar_height else -abs(float(lidar_height))
+    alignment = validate_ground_alignment(xyz, ground_prior_z=prior)
 
     # 沿地面法线的离地高度：障碍物过滤和地面识别都用它，和 LIO 原点在哪无关
     heights = (xyz - alignment.point) @ alignment.normal
@@ -509,7 +534,7 @@ def _save_yaml(path, image_filename, resolution, origin_x, origin_y):
 # ── CLI 入口 ──
 
 
-def _inspect_ground(pcd_path):
+def _inspect_ground(pcd_path, lidar_height=None):
     """诊断地面拟合：不同拟合半径下的倾斜角/内点率/残差，外加 z 分布。
 
     「地面不水平」到底是真倾斜、是野点、还是 LIO 漂了，看这张表就能分辨：
@@ -538,8 +563,12 @@ def _inspect_ground(pcd_path):
 
     # 世界原点就在雷达上（LIO 以初始雷达位姿建系），所以原点到地面的距离
     # 就是雷达离地高度 —— 标定 lio.extrinsic.odom_robo 的 z 直接用它，不用卷尺。
+    prior = None if not lidar_height else -abs(float(lidar_height))
+    if prior is not None:
+        print(f"（已按 --lidar-height {lidar_height} m 施加地面先验 "
+              f"z≈{prior:.2f}±{GROUND_PRIOR_BAND_M} m，用于挡掉地板下方的镜面倒影）")
     try:
-        a = validate_ground_alignment(xyz, max_tilt_deg=90.0)
+        a = validate_ground_alignment(xyz, max_tilt_deg=90.0, ground_prior_z=prior)
         lidar_h = -float(np.dot(a.point, a.normal))
         print(f"\n雷达离地高度 ≈ {lidar_h:.3f} m（世界原点到地面平面的距离）")
         print("  → lio.extrinsic.odom_robo 的第 3 个数（z）填 "
@@ -601,6 +630,13 @@ def main():
         help="地图边缘留白（米，默认: 1.0）",
     )
     parser.add_argument(
+        "--lidar-height",
+        type=float,
+        default=1.28,
+        help="雷达装机高度（米，卷尺实测）。用作地面先验，挡掉抛光地面在"
+             "地板下方造出的镜像层；传 0 关闭先验",
+    )
+    parser.add_argument(
         "--inspect",
         action="store_true",
         help="只诊断不出图：打印地面拟合的倾斜角/内点率/残差，"
@@ -609,7 +645,7 @@ def main():
     args = parser.parse_args()
 
     if args.inspect:
-        return _inspect_ground(args.pcd_path)
+        return _inspect_ground(args.pcd_path, lidar_height=args.lidar_height)
 
     pcd_path = Path(args.pcd_path)
     if not pcd_path.is_file():
