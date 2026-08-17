@@ -19,7 +19,11 @@
     lio.map.if_filter: true
     lio.map.save_map_dir: "map"
     lio.map.map_name: "map.pcd"
-    lio.map.ds_size: 0.25
+    # 存图前的降采样体素边长。上游默认 0.25m，但我们的 2D 栅格是 0.05m/px ——
+    # 25cm 一个点，投下去每 5×5 格才有一个黑点，墙会变成断断续续的麻点，
+    # 实测一整个展厅存下来只有 6820 个点。改成 0.05 与栅格分辨率对齐，
+    # 墙才是连续的线。代价是 map.pcd 变大（几 MB 到几十 MB），可以接受。
+    lio.map.ds_size: 0.05
     # 每 500 帧落一次盘：中途断电/进程被杀也能留下大部分地图
     lio.map.save_interval: 500
 

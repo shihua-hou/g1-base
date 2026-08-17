@@ -49,6 +49,14 @@ GROUND_MIN_INLIER_RATIO = 0.45
 GROUND_CHECK_MAX_RADIUS_M = 20.0
 DEFAULT_OBSTACLE_MIN_HEIGHT = 0.15
 DEFAULT_OBSTACLE_MAX_HEIGHT = 1.6
+# 离地 ±这个厚度内的点算"看到了地板"，据此标出可通行区域。
+# 激光能打到地板，说明那条光路上没有障碍——这是自由空间最可靠的证据，
+# 比从轨迹做光线投射简单得多，也不需要额外保存轨迹。
+DEFAULT_GROUND_BAND = 0.12
+# 自由区膨胀半径（像素）。地面点再密也是离散采样，5cm 栅格下会留下
+# 一格一格的空洞；补上这一圈，Nav2 的代价地图才不会到处是"未知"小孔。
+# 只膨胀自由区，障碍物最后画，不会被吃掉。
+DEFAULT_FREE_FILL_PX = 2
 LEGACY_Z_MIN = -0.8
 LEGACY_Z_MAX = 0.5
 
@@ -314,6 +322,8 @@ def convert_pcd_to_2d_map(
     z_min=None,
     z_max=None,
     padding=1.0,
+    ground_band=DEFAULT_GROUND_BAND,
+    free_fill_px=DEFAULT_FREE_FILL_PX,
 ):
     """将 3D PCD 点云转换为 2D 占据栅格地图。
 
@@ -348,6 +358,9 @@ def convert_pcd_to_2d_map(
 
     alignment = validate_ground_alignment(xyz)
 
+    # 沿地面法线的离地高度：障碍物过滤和地面识别都用它，和 LIO 原点在哪无关
+    heights = (xyz - alignment.point) @ alignment.normal
+
     # 2. 高度过滤。默认使用相对地面平面的离地高度；显式 z_min/z_max 保留旧调试路径。
     use_legacy_z_filter = z_min is not None or z_max is not None
     if use_legacy_z_filter:
@@ -360,7 +373,6 @@ def convert_pcd_to_2d_map(
             f"原始 z 范围: [{xyz[:, 2].min():.2f}, {xyz[:, 2].max():.2f}]"
         )
     else:
-        heights = (xyz - alignment.point) @ alignment.normal
         height_min = float(obstacle_min_height)
         height_max = float(obstacle_max_height)
         mask = (heights >= height_min) & (heights <= height_max)
@@ -376,30 +388,46 @@ def convert_pcd_to_2d_map(
     if filtered_count == 0:
         raise ValueError(empty_message)
 
-    # 3. 计算边界和栅格尺寸
-    x_min_world = filtered[:, 0].min() - padding
-    x_max_world = filtered[:, 0].max() + padding
-    y_min_world = filtered[:, 1].min() - padding
-    y_max_world = filtered[:, 1].max() + padding
+    # 3. 地面点 = 可通行的证据。
+    # 激光能打到某处的地板，说明那条光路上没东西挡着，那一格就是自由空间。
+    # 不这么做的话整张图只有"障碍"和"未知"两种值，Nav2 无处可规划 ——
+    # 之前生成的图全是灰底黑点，就是因为压根没写过自由区。
+    ground = xyz[np.abs(heights) <= float(ground_band)]
+
+    # 4. 计算边界和栅格尺寸（要把地面点也算进去，否则自由区会被裁掉）
+    span_src = np.vstack([filtered[:, :2], ground[:, :2]]) if len(ground) else filtered[:, :2]
+    x_min_world = span_src[:, 0].min() - padding
+    x_max_world = span_src[:, 0].max() + padding
+    y_min_world = span_src[:, 1].min() - padding
+    y_max_world = span_src[:, 1].max() + padding
 
     width = int(np.ceil((x_max_world - x_min_world) / resolution))
     height = int(np.ceil((y_max_world - y_min_world) / resolution))
 
-    # 4. 投影到 2D 栅格
-    # 计算每个点落入的栅格坐标
-    col = ((filtered[:, 0] - x_min_world) / resolution).astype(np.int32)
-    row = ((filtered[:, 1] - y_min_world) / resolution).astype(np.int32)
+    def _to_grid(pts):
+        c = ((pts[:, 0] - x_min_world) / resolution).astype(np.int32)
+        r = ((pts[:, 1] - y_min_world) / resolution).astype(np.int32)
+        return np.clip(r, 0, height - 1), np.clip(c, 0, width - 1)
 
-    # 裁剪到有效范围
-    col = np.clip(col, 0, width - 1)
-    row = np.clip(row, 0, height - 1)
+    # 5. 投影到 2D 栅格
+    # Nav2 map_server 约定：0=occupied(黑), 254=free(白), 205=unknown(灰)
+    grid = np.full((height, width), 205, dtype=np.uint8)   # 默认未知
 
-    # 创建栅格：205 = unknown(灰色), 254 = free(白色), 0 = occupied(黑色)
-    # Nav2 map_server 格式：0=occupied, 254=free, 205=unknown
-    grid = np.full((height, width), 205, dtype=np.uint8)  # 默认未知，不能把未观测区域当自由
+    free_mask = np.zeros((height, width), dtype=bool)
+    if len(ground):
+        gr, gc = _to_grid(ground)
+        free_mask[gr, gc] = True
+        # 地面采样是离散的，5cm 栅格下会留下一格格的空洞。补一圈，
+        # 免得代价地图里到处是"未知"小孔把路径卡死。
+        free_mask = _dilate(free_mask, int(free_fill_px))
+    grid[free_mask] = 254
 
-    # 标记占据区域
-    grid[row, col] = 0
+    # 障碍物最后画，压过自由区：同一格既看到地板又看到障碍时，按障碍算
+    orow, ocol = _to_grid(filtered)
+    grid[orow, ocol] = 0
+
+    free_cells = int(free_mask.sum())
+    occ_cells = int((grid == 0).sum())
 
     # 翻转 Y 轴（PGM 从上到下，地图 Y 从下到上）
     grid = np.flipud(grid)
@@ -421,12 +449,37 @@ def convert_pcd_to_2d_map(
         f"({alignment.candidate_count} candidates)"
     )
     print(f"  {filter_label} → {filtered_count} 点")
-    print(f"  栅格: {width} x {height} @ {resolution}m/px")
+    print(f"  地面点: {len(ground)} → 自由区 {free_cells} 格；障碍 {occ_cells} 格")
+    print(f"  栅格: {width} x {height} @ {resolution}m/px "
+          f"（自由 {free_cells * 100.0 / (width * height):.1f}%）")
     print(f"  输出: {pgm_path}")
     print(f"  输出: {yaml_path}")
     print(f"  origin: ({origin_x:.3f}, {origin_y:.3f})")
 
     return str(pgm_path), str(yaml_path)
+
+
+def _dilate(mask, radius):
+    """布尔掩码的方形膨胀。
+
+    只为了补自由区里的采样空洞，用不着 scipy —— 沿两个轴各做几次
+    邻位取或就够了，代价是 O(radius)，栅格再大也不心疼。
+    """
+    if radius <= 0:
+        return mask
+    out = mask
+    for _ in range(int(radius)):
+        padded = np.zeros_like(out)
+        padded[:, :] = out
+        padded[1:, :] |= out[:-1, :]
+        padded[:-1, :] |= out[1:, :]
+        out = padded
+        padded = np.zeros_like(out)
+        padded[:, :] = out
+        padded[:, 1:] |= out[:, :-1]
+        padded[:, :-1] |= out[:, 1:]
+        out = padded
+    return out
 
 
 def _save_pgm(path, grid):
