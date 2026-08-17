@@ -534,8 +534,16 @@
                  pose ? "" : "is-dim")}
         ${kvHtml("位姿来源", pose ? (pose.source === "lio" ? "super-lio 里程计" : "TF") : "—",
                  pose ? "" : "is-dim")}
-        ${kvHtml("雷达离地", l.ground_z != null ? `${(-l.ground_z).toFixed(2)} m` : "—",
-                 l.ground_z != null ? "" : "is-dim")}
+        ${(() => {
+          // 雷达离地 = 雷达 z − 地面 z。别写成 -ground_z ——
+          // 那等于假设世界原点在雷达上，而 odom_robo 的平移量决定原点在哪
+          // （super_lio.cpp:155），现在原点在地面，那样算出来恒等于 0。
+          const h = (l.ground_z != null && pose && pose.z != null)
+            ? pose.z - l.ground_z
+            : (l.ground_z != null ? -l.ground_z : null);
+          return kvHtml("雷达离地", h != null ? `${h.toFixed(2)} m` : "—",
+                        h == null ? "is-dim" : (Math.abs(h - 1.28) > 0.25 ? "is-warn" : ""));
+        })()}
         ${kvHtml("LIO 高度 z", pose && pose.z != null ? `${pose.z.toFixed(2)} m` : "—",
                  pose && pose.z != null && Math.abs(pose.z) > 0.30 ? "is-crit" : "",
                  pose && pose.z != null && Math.abs(pose.z) > 0.30 ? "bad" : "")}

@@ -217,27 +217,36 @@ def read_pcd(pcd_path):
 
 
 def pick_ground_prior(points, lidar_height, band=GROUND_PRIOR_BAND_M):
-    """在 ±lidar_height 两侧各开一个窗数点，返回 (先验 z, up_sign)。
+    """在几个可能的地面高度上各开一个窗数点，返回 (先验 z, up_sign)。
 
-    LIO 世界原点在起始时刻的雷达上，所以地面必在距原点 lidar_height 处 ——
-    但在 z 的哪一侧取决于世界系 Z 的朝向，而雷达倒装会让它朝下。
-    实测吃过亏：主平面在 -2.55m 被当成地面，算出"雷达离地 2.55m"，
-    而卷尺是 1.28m —— 那其实是天花板。所以两侧都数，不做假设。
+    世界原点在哪由 lio.extrinsic.odom_robo 的平移量决定
+    （super_lio.cpp:155  state.p = g_odom_robo.t_），所以地面可能在 z=0
+    （平移量填了雷达高度，原点落在地面）也可能在 z=∓lidar_height
+    （平移量为 0，原点落在雷达上），而在哪一侧还取决于世界系 Z 的朝向。
+    与其假设配置是对的，不如三处都数一遍，哪处点最密算哪处。
     找不到就返回 (None, 1.0)，让调用方退回无先验的老路。
     """
     if np is None or not lidar_height:
         return None, 1.0
     z = np.asarray(points, dtype=np.float64)[:, 2]
     h = abs(float(lidar_height))
+    # 三个候选：
+    #   0   —— 世界原点已经在地面上（odom_robo 平移量填了雷达高度，正确配置）
+    #   ∓h  —— 世界原点在雷达上，地面在其下方；哪一侧取决于世界系 Z 的朝向
+    # 全部试一遍，哪处点最密算哪处，不预设配置对不对。
     best, best_n = None, 0
-    for sign in (-1.0, 1.0):
-        n = int(np.count_nonzero(np.abs(z - sign * h) <= 0.15))
+    for cand in (0.0, -h, h):
+        n = int(np.count_nonzero(np.abs(z - cand) <= 0.15))
         if n > best_n:
-            best, best_n = sign, n
+            best, best_n = cand, n
     if best is None or best_n < 64:
         return None, 1.0
-    # 地面在 -z 侧 → 天空朝 +z；地面在 +z 侧 → 天空朝 -z
-    return best * h, -best
+    if best == 0.0:
+        # 原点在地面：靠地面上方的点更多来定"天空"朝哪
+        up = 1.0 if np.count_nonzero(z > 0.3) >= np.count_nonzero(z < -0.3) else -1.0
+        return 0.0, up
+    # 地面在 -z 侧 → 天空朝 +z；在 +z 侧 → 天空朝 -z
+    return best, (1.0 if best < 0 else -1.0)
 
 
 def validate_ground_alignment(
@@ -589,8 +598,10 @@ def _inspect_ground(pcd_path, lidar_height=None):
     print(f"\n当前生效阈值 MAX_WORLD_TILT_DEG = {MAX_WORLD_TILT_DEG}°，"
           f"拟合半径 = {GROUND_CHECK_MAX_RADIUS_M} m")
 
-    # 世界原点就在雷达上（LIO 以初始雷达位姿建系），所以原点到地面的距离
-    # 就是雷达离地高度 —— 标定 lio.extrinsic.odom_robo 的 z 直接用它，不用卷尺。
+    # 世界原点在哪由 lio.extrinsic.odom_robo 的平移量决定
+    # （super_lio.cpp:155  state.p = g_odom_robo.t_）。所以这里只如实报出地面
+    # 平面的 z，再据此说明原点落在地面还是雷达上 —— 不再反过来声称"这就是
+    # 雷达离地高度"，那个说法只在原点恰好在雷达上时才成立。
     prior, up_sign = pick_ground_prior(xyz, lidar_height)
     if prior is None:
         print(f"\n在 ±{lidar_height} m 两侧都没找到稠密平面 —— 地面可能超出了 "
@@ -607,12 +618,19 @@ def _inspect_ground(pcd_path, lidar_height=None):
     try:
         a = validate_ground_alignment(xyz, max_tilt_deg=90.0,
                                       ground_prior_z=prior, up_sign=up_sign)
-        lidar_h = abs(float(np.dot(a.point, a.normal)))
-        print(f"\n雷达离地高度 ≈ {lidar_h:.3f} m（世界原点到地面平面的距离）")
-        print("  → lio.extrinsic.odom_robo 的第 3 个数（z）填 "
-              f"{-lidar_h:.3f}，可把机器人位姿的原点落到地面")
+        gz = float(a.point[2])
+        print(f"\n地面平面在 z = {gz:+.3f} m")
+        if abs(gz) <= 0.25:
+            print("  → 世界原点就落在地面上，odom_robo 的平移量填对了")
+        elif lidar_height and abs(abs(gz) - abs(float(lidar_height))) <= 0.25:
+            print(f"  → 世界原点在雷达上（地面在其下方 {abs(gz):.2f} m）。"
+                  f"把 lio.extrinsic.odom_robo 的第 3 个数改成 +{abs(gz):.2f}，"
+                  "原点就会移到地面")
+        else:
+            print(f"  → 与 --lidar-height {lidar_height} m 对不上，"
+                  "检查 odom_robo 的平移量或者实测高度")
     except Exception as exc:
-        print(f"\n雷达离地高度: 算不出（{exc}）")
+        print(f"\n地面平面: 算不出（{exc}）")
     return 0
 
 
