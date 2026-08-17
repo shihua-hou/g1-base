@@ -165,13 +165,22 @@ class LiveMapView:
 
     def __init__(self, node, cloud_topic="/lio/cloud_world", resolution=0.05,
                  z_min=-0.35, z_max=1.60, voxel_size=0.08, map_frame="map",
-                 frame_override="", callback_group=None):
+                 frame_override="", voxel_z_min=-6.0, voxel_z_max=6.0,
+                 callback_group=None):
         self.node = node
         self.topic = cloud_topic
         self.resolution = float(resolution)
         self.z_min = float(z_min)
         self.z_max = float(z_max)
         self.voxel_size = float(voxel_size)
+        # 3D 视图的离群带。比 2D 的 [z_min, z_max] 宽得多 —— 天花板、
+        # 货架、二层挑空都要留住，只拦明显是脏数据的点。
+        # LIO 刚起步时位姿还没收敛，偶尔会甩出 z=-33m 这种点，
+        # 它们会把前端高度配色的归一化区间撑爆（真实结构全挤进色带顶端
+        # 几个百分点，看上去就是一片糊的单色），所以必须在入口就拦掉。
+        self.voxel_z_min = float(voxel_z_min)
+        self.voxel_z_max = float(voxel_z_max)
+        self.dropped_outlier = 0
         # 点云未必是世界系的：G1 上 /lio/cloud_world 实际是 DDS 域桥把
         # /utlidar/cloud_livox_mid360（传感器系）改了个名字，直接堆会糊成一团。
         # 这里统一按 TF 变换到 map 系再累积；变换不了就不堆，并如实上报原因。
@@ -282,11 +291,20 @@ class LiveMapView:
     def _accumulate_voxels(self, xyz):
         """把整帧点云按体素去重后追加进 3D 缓冲。
 
-        和 2D 栅格不同，这里不做 z 过滤 —— 3D 视图就是要看天花板、
+        和 2D 栅格不同，这里不按机器人高度过滤 —— 3D 视图就是要看天花板、
         货架、桌面这些立体结构，滤掉就退化成平面图了。
+        只用一条宽松的离群带拦掉脏点，见 voxel_z_min/voxel_z_max。
         """
         if xyz is None or np is None or not len(xyz):
             return
+        keep = (xyz[:, 2] >= self.voxel_z_min) & (xyz[:, 2] <= self.voxel_z_max)
+        n_drop = int(len(xyz) - int(keep.sum()))
+        if n_drop:
+            with self.lock:
+                self.dropped_outlier += n_drop
+            xyz = xyz[keep]
+            if not len(xyz):
+                return
         vs = self.voxel_size
         bias = self._VOXEL_BIAS
         q = np.floor(xyz / vs).astype(np.int64) + bias
@@ -368,6 +386,8 @@ class LiveMapView:
             "tf_ok": self.tf_ok,
             "tf_error": self.tf_error,
             "dropped_no_tf": self.dropped_no_tf,
+            # 被离群带拦掉的点数。持续猛涨说明 LIO 在发散，不是显示问题
+            "dropped_outlier": self.dropped_outlier,
         }
 
     def render(self, max_dim=900):
@@ -600,7 +620,9 @@ class BridgeNode(Node):
         self.live_map = LiveMapView(
             self, cloud_topic=args.cloud_topic, resolution=args.live_map_resolution,
             voxel_size=args.live_cloud_voxel, map_frame=args.map_frame,
-            frame_override=args.cloud_frame_override, callback_group=self._group,
+            frame_override=args.cloud_frame_override,
+            voxel_z_min=args.live_cloud_z_min, voxel_z_max=args.live_cloud_z_max,
+            callback_group=self._group,
         )
 
         # ── 相机中继（有 CompressedImage 话题就转发 JPEG，没有就显示占位） ──
@@ -1785,6 +1807,11 @@ def parse_args(argv=None):
                              "frame_id 若不可信可用它指定，例如 base_link")
     parser.add_argument("--live-cloud-voxel", type=float, default=0.08,
                         help="建图 3D 点云的体素边长（米），越小越细但点数涨得快")
+    parser.add_argument("--live-cloud-z-min", type=float, default=-6.0,
+                        help="建图 3D 点云的离群下界（米，相对建图原点）。"
+                             "拦掉 LIO 未收敛时甩出的野点，否则高度配色会被撑爆")
+    parser.add_argument("--live-cloud-z-max", type=float, default=6.0,
+                        help="建图 3D 点云的离群上界（米，相对建图原点）")
     parser.add_argument("--plan-topic", default="/plan",
                         help="nav_msgs/Path 话题，用于在网页地图上画规划路径")
     # 摇杆速度上限
