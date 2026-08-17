@@ -536,6 +536,9 @@
                  pose ? "" : "is-dim")}
         ${kvHtml("雷达离地", l.ground_z != null ? `${(-l.ground_z).toFixed(2)} m` : "—",
                  l.ground_z != null ? "" : "is-dim")}
+        ${kvHtml("LIO 高度 z", pose && pose.z != null ? `${pose.z.toFixed(2)} m` : "—",
+                 pose && pose.z != null && Math.abs(pose.z) > 0.30 ? "is-crit" : "",
+                 pose && pose.z != null && Math.abs(pose.z) > 0.30 ? "bad" : "")}
         ${kvHtml("雷达姿态",
                  pose && pose.pitch_deg != null
                    ? `俯仰 ${pose.pitch_deg.toFixed(1)}° · 横滚 ${pose.roll_deg.toFixed(1)}°`
