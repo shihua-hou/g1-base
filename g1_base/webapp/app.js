@@ -501,6 +501,7 @@
   // 中间是 super-lio 点云实时攒出来的栅格图（看着地图长出来），
   // 左边建图状态，右边三个动作，下面两个摇杆边走边建。
   let liveMapGeo = null;   // 最近一次实时地图的几何信息，供状态栏显示范围
+  let liveMapView = null;  // 2D 栅格视图句柄，切标签时要通知它重新量尺寸
 
   function mappingStatusHtml(live) {
     const navm = (state.status && state.status.navigation_manager) || {};
@@ -672,7 +673,10 @@
       cloud.hidden = mode !== "cloud";
       legend.hidden = mode !== "cloud";
       grid.hidden = mode === "cloud";
-      if (mode === "cloud" && mapCloud) mapCloud.resize();
+      // 两边都要在"刚变可见"时重新量尺寸 —— 隐藏期间 clientWidth/Height 是 0，
+      // 画布建出来就是 0×0，不补这一下就是一块白板。
+      if (mode === "cloud") { if (mapCloud) mapCloud.resize(); }
+      else if (liveMapView) liveMapView.resize();
     }));
   }
 
@@ -750,7 +754,14 @@
         if (stopped) return;
         if (!view) {
           view = await mountMapView(wrap, { imageBlob: blob, geo });
-          if (view) onPageLeave(() => view.destroy && view.destroy());
+          liveMapView = view;
+          if (view) onPageLeave(() => {
+            liveMapView = null;
+            view.destroy && view.destroy();
+          });
+          // 挂载时这个面板多半还藏在 3D 后面，尺寸是 0。若此刻正好可见，
+          // 补一次 resize 把 0×0 的画布撑开。
+          if (view && !wrap.hidden) view.resize();
         } else {
           const url = URL.createObjectURL(blob);
           view.setImage(url, geo);
@@ -929,6 +940,7 @@
       let placing = null;        // 长按放置中：{ px, py, world, yaw_deg, cur }
       let holdTimer = null;
       let dragWp = -1;           // 正在拖动的巡航点下标
+      let fitted = false;        // 是否已在"真的可见"的状态下自适应过，见 fit()
 
       function resize() {
         const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -948,6 +960,9 @@
         const ih = img.naturalHeight || geo.render_height || 1;
         view.scale = Math.min(w / iw, h / ih) * 0.94;
         view.tx = 0; view.ty = 0; view.rot = 0;
+        // 元素还隐藏着的话上面拿到的是 0（这里兜成了 1），算出来的 scale 没意义。
+        // 标记一下，等真正显示出来再补一次自适应。
+        fitted = wrapEl.clientWidth > 0 && wrapEl.clientHeight > 0;
         draw();
       }
 
@@ -1276,6 +1291,10 @@
       const handle = {
         redraw: draw,
         fit,
+        // 从隐藏切到显示时必须叫一次：canvas 是按 clientWidth/Height 建的，
+        // 元素隐藏时那两个值是 0，resize() 会直接 return，画布就一直是 0×0
+        // ——建图页默认停在 3D 标签，2D 栅格就是这么变成白板的。
+        resize: () => { resize(); if (!fitted) fit(); },
         setWaypoints(list) { waypoints = list || []; draw(); },
         setMarks(list) { marks = list || []; draw(); },
         setPath(points) { path = points || []; draw(); },
