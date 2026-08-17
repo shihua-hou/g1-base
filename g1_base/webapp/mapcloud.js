@@ -74,9 +74,10 @@
       this.grid = grid;
       this.groundZ = 0;
 
-      // 世界原点的三轴，红=X 绿=Y 蓝=Z
-      const axes = new THREE.AxesHelper(1.2);
-      this.scene.add(axes);
+      // 这里原本放了一个世界原点的三轴指示器。去掉了：
+      // 它标的是"建图起点"而不是机器人当前位置，又因为 LIO 原点在雷达上，
+      // 看上去就是一个浮在半空、含义不明的十字。机器人锥体已经把
+      // "现在在哪、朝哪"说清楚了，再多一个只会让人误读。
 
       // 点云本体：一次性分配满容量，之后只改 drawRange
       const geom = new THREE.BufferGeometry();

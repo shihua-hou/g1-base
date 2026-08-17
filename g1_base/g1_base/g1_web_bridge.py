@@ -257,14 +257,17 @@ class LiveMapView:
                 # 跟「保存地图」出来的结果完全对不上。地面还没估出来时才退回绝对 z。
                 zz = xyz_all[:, 2]
                 ground_z = self.ground_level()
+                # 地面还没估出来（开头几帧点太少）就先不往 2D 里堆。
+                # 用绝对 z 兜底的话，那批按错误高度带切出来的格子会被永久
+                # 记进 cells，后面再也擦不掉 —— 宁可晚一两帧。
                 if ground_z is None:
-                    lo, hi, glo, ghi = self.z_min, self.z_max, None, None
+                    lo = hi = glo = ghi = None
                 else:
                     lo = ground_z + self.obstacle_min_h
                     hi = ground_z + self.obstacle_max_h
                     glo = ground_z - self.ground_band
                     ghi = ground_z + self.ground_band
-                xyz = xyz_all[(zz >= lo) & (zz <= hi)]
+                xyz = xyz_all[(zz >= lo) & (zz <= hi)] if lo is not None else xyz_all[:0]
                 if xyz.shape[0]:
                     cols = np.floor(xyz[:, 0] / res).astype(np.int32)
                     rows = np.floor(xyz[:, 1] / res).astype(np.int32)
@@ -384,12 +387,17 @@ class LiveMapView:
             self._z_range[1] = hi if self._z_range[1] is None else max(self._z_range[1], hi)
 
     def ground_level(self):
-        """估计地面在世界系里的 z，用来把 3D 视图的高度显示改成"离地高度"。
+        """估计地面在世界系里的 z，用来把高度显示和 2D 高度带都换算成"离地"。
 
-        LIO 的世界原点在雷达上（雷达装在头上，离地一米多），所以点云里
-        z=0 是雷达高度而不是地面 —— 看图的人会以为机器人陷在地里。
-        取 z 的 2% 分位数当地面：比最小值稳（挡得住零星穿地的野点），
-        又比中位数低得多（中位数会落在墙面上）。
+        LIO 的世界原点在雷达上（装在头上，离地一米多），所以点云里 z=0 是
+        雷达高度而不是地面。
+
+        判据是"z 方向上最密的那一层"，不是低分位数。低分位数扛不住地面镜面
+        反射 —— 展厅的抛光地板会把天花板和灯具镜像到地板下方一大片，实测
+        2% 分位数被拉到 -2.60m，而真实地面在 -1.28m。差这 1.3m 会让 2D 的
+        障碍带把地板本身当成障碍，自由区一格都出不来。
+        地面是场景里最大的连续平面，它的点几乎全落进同一个 z 桶里，
+        而墙面会摊在两三米的高度上，所以直方图峰值稳稳落在地面。
         """
         if np is None:
             return None
@@ -397,11 +405,17 @@ class LiveMapView:
             n = len(self._voxel_xyz) // 3
             if n < 200:
                 return None
-            # 体素只增不减，涨幅不到 5% 就沿用上次结果，别每 700ms 排一次序
+            # 体素只增不减，涨幅不到 5% 就沿用上次结果，别每 700ms 重算一遍
             if self._ground_cache and n - self._ground_cache[0] < max(200, n * 0.05):
                 return self._ground_cache[1]
             zs = np.frombuffer(memoryview(self._voxel_xyz), dtype=np.float32)[2::3]
-            ground = float(np.percentile(zs, 2.0))
+            lo, hi = float(zs.min()), float(zs.max())
+            if not (hi > lo):
+                return None
+            bins = max(8, min(400, int(round((hi - lo) / 0.05))))
+            counts, edges = np.histogram(zs, bins=bins, range=(lo, hi))
+            peak = int(np.argmax(counts))
+            ground = float((edges[peak] + edges[peak + 1]) * 0.5)
             self._ground_cache = (n, ground)
             return ground
 
