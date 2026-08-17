@@ -142,6 +142,25 @@ def _yaw_from_quaternion(z, w):
     return math.atan2(2.0 * w * z, 1.0 - 2.0 * z * z)
 
 
+def _rpy_from_quaternion(x, y, z, w):
+    """四元数 → (roll, pitch, yaw)，弧度，ZYX 顺序。
+
+    建图时用来读雷达的安装角：Super-LIO 做了重力对齐，世界系 Z 就是真实
+    垂直方向，而 IMU 在雷达壳体里跟着一起歪 —— 所以机器人直立站在平地上时，
+    这里算出来的 roll/pitch 就是雷达的安装角，不用拿量角器去比。
+    """
+    sinr_cosp = 2.0 * (w * x + y * z)
+    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
+    roll = math.atan2(sinr_cosp, cosr_cosp)
+    sinp = 2.0 * (w * y - z * x)
+    # 万向锁附近 asin 会因浮点误差越界，夹一下
+    pitch = math.copysign(math.pi / 2.0, sinp) if abs(sinp) >= 1.0 else math.asin(sinp)
+    siny_cosp = 2.0 * (w * z + x * y)
+    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
+    yaw = math.atan2(siny_cosp, cosy_cosp)
+    return roll, pitch, yaw
+
+
 class ApiError(Exception):
     def __init__(self, message, code=400):
         super().__init__(message)
@@ -727,9 +746,14 @@ class BridgeNode(Node):
     def _on_lio_odom(self, msg):
         p = msg.pose.pose.position
         q = msg.pose.pose.orientation
+        roll, pitch, yaw = _rpy_from_quaternion(q.x, q.y, q.z, q.w)
         self._lio_pose = {
             "x": float(p.x), "y": float(p.y), "z": float(p.z),
-            "yaw": _yaw_from_quaternion(q.z, q.w),
+            "yaw": yaw,
+            # roll/pitch 在这里不是"机器人姿态"而是标定读数：世界系已被重力
+            # 对齐，机器人直立站平地时这两个数就是雷达的安装角。
+            "roll_deg": math.degrees(roll),
+            "pitch_deg": math.degrees(pitch),
         }
         self._lio_pose_time = time.time()
 

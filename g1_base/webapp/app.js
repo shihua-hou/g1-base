@@ -535,9 +535,17 @@
                  pose ? "" : "is-dim")}
         ${kvHtml("雷达离地", l.ground_z != null ? `${(-l.ground_z).toFixed(2)} m` : "—",
                  l.ground_z != null ? "" : "is-dim")}
+        ${kvHtml("雷达姿态",
+                 pose && pose.pitch_deg != null
+                   ? `俯仰 ${pose.pitch_deg.toFixed(1)}° · 横滚 ${pose.roll_deg.toFixed(1)}°`
+                   : "—",
+                 pose && pose.pitch_deg != null ? "" : "is-dim")}
         ${kvHtml("分辨率", l.resolution ? l.resolution + " m/px" : "—")}
       </div>
       <p class="note">开始建图后用下方摇杆把场地走一遍；停止建图会保存点云，再点「保存地图」生成 2D 栅格快照，之后在「地图列表」里激活。</p>
+      <p class="note">标定雷达安装角：让机器人<b>直立站在平地上</b>，开始建图后原地不动，
+      上面「雷达姿态」的读数就是安装角（世界系已按重力对齐，站直时这两个数只反映雷达装歪了多少）。
+      读数稳定后取平均填进 <code>lio.extrinsic.odom_robo</code>。</p>
     `;
   }
 
