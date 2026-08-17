@@ -1067,11 +1067,7 @@ class NavigationManager(Node):
 
         返回 (pgm_path, yaml_path, pcd_copy_path)；失败抛异常。
         """
-        from g1_base.pcd_to_2d_map import (
-            LEGACY_Z_MAX,
-            LEGACY_Z_MIN,
-            convert_pcd_to_2d_map,
-        )
+        from g1_base.pcd_to_2d_map import convert_pcd_to_2d_map
 
         maps_dir = self._resolve_maps_dir()
         maps_dir.mkdir(parents=True, exist_ok=True)
@@ -1079,12 +1075,12 @@ class NavigationManager(Node):
         pcd_target = maps_dir / f"{base_name}_map.pcd"
         shutil.copy2(pcd_path, pcd_target)
 
+        # 不传 z_min/z_max：那是按绝对 z 切片的旧路径，隐含假设 LIO 原点
+        # 离地约一米。默认路径按沿地面法线的离地高度过滤，原点在哪都对。
         pgm, yaml_f = convert_pcd_to_2d_map(
             pcd_path=str(pcd_target),
             output_dir=str(maps_dir),
             output_name=f"{base_name}_{MAP_NAME_SUFFIX}",
-            z_min=LEGACY_Z_MIN,
-            z_max=LEGACY_Z_MAX,
         )
         return pgm, yaml_f, str(pcd_target)
 

@@ -1047,30 +1047,29 @@ def save_live_map(name):
     if yaml_path.exists():
         raise ApiError(f"地图「{name}」已存在，换个名字", 409)
 
-    from g1_base.pcd_to_2d_map import (
-        LEGACY_Z_MAX,
-        LEGACY_Z_MIN,
-        TiltedWorldError,
-        convert_pcd_to_2d_map,
-    )
+    from g1_base.pcd_to_2d_map import TiltedWorldError, convert_pcd_to_2d_map
 
     # 先把 PCD 收进地图目录再转换：转换器按 pcd 所在目录写产物，
     # 而且原始点云要跟快照一起留档（重定位和以后重新投影都要用）
     pcd_target = maps_dir / f"{name}_map.pcd"
     shutil.copy2(src, pcd_target)
     try:
+        # 不传 z_min/z_max —— 那会退回按绝对 z 切片的旧路径。
+        # 默认路径按"沿地面法线的离地高度"过滤，既不在乎 LIO 原点在雷达
+        # 还是在基座（odom_robo 标不标定都一样），也不在乎地面有点倾斜。
         pgm, yaml_f = convert_pcd_to_2d_map(
             pcd_path=str(pcd_target),
             output_dir=str(maps_dir),
             output_name=f"{name}_{MAP_NAME_SUFFIX}",
-            z_min=LEGACY_Z_MIN,
-            z_max=LEGACY_Z_MAX,
         )
     except TiltedWorldError as exc:
         pcd_target.unlink(missing_ok=True)
-        raise ApiError(
-            f"地面不水平（倾斜 {exc.tilt_deg:.1f}°），投成 2D 会失真。"
-            "多半是建图起步时机器人没站稳，重建一次试试", 422)
+        # 倾斜大 + 残差小 = 整体歪了；残差也大 = 地面根本不平（LIO 漂了）
+        drifted = (exc.residual_rms or 0.0) > 0.25
+        why = ("地面拟合残差 %.2f m，说明地面本身就不平 —— 多半是 LIO 漂了，"
+               "走短一点、慢一点、尽量回到起点闭环再试" % exc.residual_rms) if drifted else \
+              "地面本身是平的，只是整体歪了；若确认场地无坡，把 MAX_WORLD_TILT_DEG 调大即可"
+        raise ApiError(f"地面倾斜 {exc.tilt_deg:.1f}°（上限 {exc.max_tilt_deg:.0f}°）。{why}", 422)
     except Exception as exc:
         pcd_target.unlink(missing_ok=True)
         raise ApiError(f"生成 2D 地图失败：{exc}", 500)

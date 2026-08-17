@@ -26,7 +26,24 @@ except ImportError:
 
 
 GROUND_CHECK_CELL_SIZE_M = 0.5
-MAX_WORLD_TILT_DEG = 1.5
+# 稳健拟合之后仍然超过这个角度，才认为世界系真的歪了。
+# 原来是 1.5°，实测太严：拟合本身没有离群剔除，几个穿到地板以下的野点
+# 就能把平面拽歪十几度，好好的图存不下来。
+# 放宽到 12° 是安全的 —— 高度过滤走的是"沿地面法线的离地高度"
+# （见 convert_pcd_to_2d_map），本来就对倾斜免疫；XY 投影在 12° 时
+# 的尺度畸变是 1-cos12° ≈ 2%，5cm 分辨率下不到一个像素。
+MAX_WORLD_TILT_DEG = 12.0
+# RANSAC：地面点里混进野点是常态，不能用普通最小二乘
+GROUND_RANSAC_ITERS = 240
+GROUND_RANSAC_TOL_M = 0.08
+# 内点率低于此值说明"地面"根本不是一个平面（多层、斜坡，或 LIO 漂了）
+GROUND_MIN_INLIER_RATIO = 0.45
+# 只用离原点这个半径内的点拟合地面。
+# MID360 量程 70m，半分钟不动也能扫出 50×70m 的图，但远处地面是以极小的
+# 掠射角打到的，仰角误差被距离放大得厉害。而"每格取最低点"恰好专挑这些
+# 远场坏点，杠杆又长 —— 35m 外差 3.8m 就能把平面撬起 6°。
+# 近场地面点又准又密，够拟合了。0 表示不限制。
+GROUND_CHECK_MAX_RADIUS_M = 20.0
 DEFAULT_OBSTACLE_MIN_HEIGHT = 0.15
 DEFAULT_OBSTACLE_MAX_HEIGHT = 1.6
 LEGACY_Z_MIN = -0.8
@@ -39,18 +56,26 @@ class GroundAlignment:
     normal: object
     tilt_deg: float
     candidate_count: int
+    inlier_ratio: float = 1.0
+    residual_rms: float = 0.0
 
 
 class TiltedWorldError(Exception):
-    def __init__(self, tilt_deg, max_tilt_deg, normal):
+    def __init__(self, tilt_deg, max_tilt_deg, normal,
+                 inlier_ratio=None, residual_rms=None):
         self.tilt_deg = float(tilt_deg)
         self.max_tilt_deg = float(max_tilt_deg)
         self.normal = normal
+        self.inlier_ratio = inlier_ratio
+        self.residual_rms = residual_rms
+        detail = ""
+        if inlier_ratio is not None and residual_rms is not None:
+            detail = (f" (ground inliers {inlier_ratio * 100:.0f}%, "
+                      f"residual RMS {residual_rms:.2f} m)")
         super().__init__(
             "PCD world frame is tilted "
             f"{self.tilt_deg:.2f}° from +Z; max allowed is "
-            f"{self.max_tilt_deg:.2f}°. Rebuild the map with the robot still "
-            "during LIO initialization."
+            f"{self.max_tilt_deg:.2f}°{detail}."
         )
 
 
@@ -174,6 +199,7 @@ def validate_ground_alignment(
     points,
     cell_size=GROUND_CHECK_CELL_SIZE_M,
     max_tilt_deg=MAX_WORLD_TILT_DEG,
+    max_radius_m=GROUND_CHECK_MAX_RADIUS_M,
 ):
     if np is None:
         raise ImportError("numpy 未安装，请运行: pip3 install numpy")
@@ -188,19 +214,35 @@ def validate_ground_alignment(
     if len(xyz) < 3:
         raise ValueError("地面校验需要至少 3 个有效点")
 
-    cells = np.floor(xyz[:, :2] / float(cell_size)).astype(np.int64)
-    order = np.lexsort((xyz[:, 2], cells[:, 1], cells[:, 0]))
+    # 拟合地面只用近场点，远场掠射点误差被距离放大（见 GROUND_CHECK_MAX_RADIUS_M）。
+    # 注意只影响"拟合"，高度过滤和投影仍然用全部点，地图范围不会被裁掉。
+    fit_src = xyz
+    if max_radius_m and float(max_radius_m) > 0.0:
+        center = np.median(xyz[:, :2], axis=0)
+        near = np.linalg.norm(xyz[:, :2] - center, axis=1) <= float(max_radius_m)
+        if int(near.sum()) >= 32:      # 近场点太少就退回用全部，总比拟合不出来强
+            fit_src = xyz[near]
+
+    cells = np.floor(fit_src[:, :2] / float(cell_size)).astype(np.int64)
+    order = np.lexsort((fit_src[:, 2], cells[:, 1], cells[:, 0]))
     sorted_cells = cells[order]
     first_in_cell = np.empty(len(order), dtype=bool)
     first_in_cell[0] = True
     first_in_cell[1:] = np.any(sorted_cells[1:] != sorted_cells[:-1], axis=1)
-    ground = xyz[order[first_in_cell]]
+    ground = fit_src[order[first_in_cell]]
 
     if len(ground) < 3:
         raise ValueError("地面校验需要至少 3 个网格候选点")
 
-    plane_point = ground.mean(axis=0)
-    _, _, vh = np.linalg.svd(ground - plane_point, full_matrices=False)
+    # 每格取最低点当地面候选，恰恰是野点最爱待的位置：LIO 未收敛时甩出的
+    # 点、玻璃/镜面的穿透点，全都比真地面低。普通最小二乘对它们毫无抵抗力，
+    # 几个点就能把平面拽歪十几度。所以先 RANSAC 挑出真正共面的那批点再拟合。
+    inliers = _ransac_plane_inliers(ground, GROUND_RANSAC_TOL_M, GROUND_RANSAC_ITERS)
+    fit_pts = ground[inliers] if inliers is not None and int(inliers.sum()) >= 3 else ground
+    inlier_ratio = float(len(fit_pts)) / float(len(ground))
+
+    plane_point = fit_pts.mean(axis=0)
+    _, _, vh = np.linalg.svd(fit_pts - plane_point, full_matrices=False)
     normal = vh[-1].astype(np.float64)
     normal_norm = np.linalg.norm(normal)
     if not math.isfinite(float(normal_norm)) or normal_norm <= 0.0:
@@ -210,16 +252,50 @@ def validate_ground_alignment(
     if normal[2] < 0.0:
         normal = -normal
 
+    # 内点到平面的 RMS：区分"整体歪了"和"地面根本不平"。
+    # 前者 RMS 小、单纯是个倾斜，后者说明 LIO 漂了或场地本来就有高差。
+    residual_rms = float(np.sqrt(np.mean(((fit_pts - plane_point) @ normal) ** 2)))
+
     tilt_deg = math.degrees(math.acos(float(np.clip(normal[2], -1.0, 1.0))))
     alignment = GroundAlignment(
         point=plane_point,
         normal=normal,
         tilt_deg=tilt_deg,
         candidate_count=len(ground),
+        inlier_ratio=inlier_ratio,
+        residual_rms=residual_rms,
     )
     if tilt_deg > float(max_tilt_deg):
-        raise TiltedWorldError(tilt_deg, max_tilt_deg, normal)
+        raise TiltedWorldError(tilt_deg, max_tilt_deg, normal,
+                               inlier_ratio=inlier_ratio, residual_rms=residual_rms)
     return alignment
+
+
+def _ransac_plane_inliers(pts, tol, iters, seed=12345):
+    """在候选地面点里找出最大的共面子集，返回布尔掩码（找不到返回 None）。
+
+    固定随机种子：同一份点云每次跑出来的地图必须一模一样，
+    否则同一张图重存两次得到两个略有差别的 pgm，排障时会怀疑人生。
+    """
+    n = len(pts)
+    if n < 3:
+        return None
+    rng = np.random.default_rng(seed)
+    best_mask = None
+    best_count = 0
+    for _ in range(int(iters)):
+        idx = rng.choice(n, size=3, replace=False)
+        p0, p1, p2 = pts[idx]
+        nrm = np.cross(p1 - p0, p2 - p0)
+        nlen = float(np.linalg.norm(nrm))
+        if nlen < 1e-9:
+            continue           # 三点共线，这次采样作废
+        nrm = nrm / nlen
+        mask = np.abs((pts - p0) @ nrm) <= float(tol)
+        count = int(mask.sum())
+        if count > best_count:
+            best_count, best_mask = count, mask
+    return best_mask
 
 
 # ── 2D 地图生成 ──
@@ -377,6 +453,35 @@ def _save_yaml(path, image_filename, resolution, origin_x, origin_y):
 # ── CLI 入口 ──
 
 
+def _inspect_ground(pcd_path):
+    """诊断地面拟合：不同拟合半径下的倾斜角/内点率/残差，外加 z 分布。
+
+    「地面不水平」到底是真倾斜、是野点、还是 LIO 漂了，看这张表就能分辨：
+      · 各半径下倾斜角都很小        → 地面本来就是平的，之前是误报
+      · 半径越大倾斜角越大          → 远场点不可信（掠射角误差 / 漂移）
+      · 内点率低、残差大            → 地面根本不是一个平面，多半是 LIO 漂了
+      · 各半径下倾斜角一致且很大    → 场地是真的有坡
+    """
+    xyz = read_pcd(str(pcd_path))
+    print(f"点数 {len(xyz)}")
+    print("z 分位数 " + "  ".join(
+        f"p{p}={np.percentile(xyz[:, 2], p):.2f}" for p in (0.1, 1, 50, 99, 99.9)))
+    span = xyz[:, :2].max(axis=0) - xyz[:, :2].min(axis=0)
+    print(f"平面范围 {span[0]:.1f} × {span[1]:.1f} m")
+    print(f"{'拟合半径':>10}  {'倾斜角':>8}  {'内点率':>8}  {'残差RMS':>9}  {'候选点':>8}")
+    for radius in (5.0, 10.0, 20.0, 40.0, 0.0):
+        label = "全部" if radius == 0.0 else f"{radius:.0f} m"
+        try:
+            a = validate_ground_alignment(xyz, max_tilt_deg=90.0, max_radius_m=radius)
+            print(f"{label:>10}  {a.tilt_deg:7.2f}°  {a.inlier_ratio * 100:7.0f}%  "
+                  f"{a.residual_rms:8.3f} m  {a.candidate_count:8d}")
+        except Exception as exc:
+            print(f"{label:>10}  失败: {exc}")
+    print(f"\n当前生效阈值 MAX_WORLD_TILT_DEG = {MAX_WORLD_TILT_DEG}°，"
+          f"拟合半径 = {GROUND_CHECK_MAX_RADIUS_M} m")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="3D PCD 点云 → 2D 占据栅格地图转换器"
@@ -428,7 +533,16 @@ def main():
         default=1.0,
         help="地图边缘留白（米，默认: 1.0）",
     )
+    parser.add_argument(
+        "--inspect",
+        action="store_true",
+        help="只诊断不出图：打印地面拟合的倾斜角/内点率/残差，"
+             "并对比不同拟合半径的结果，用来判断「地面不水平」是真是假",
+    )
     args = parser.parse_args()
+
+    if args.inspect:
+        return _inspect_ground(args.pcd_path)
 
     pcd_path = Path(args.pcd_path)
     if not pcd_path.is_file():
