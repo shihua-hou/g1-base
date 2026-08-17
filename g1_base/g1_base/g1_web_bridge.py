@@ -222,7 +222,14 @@ class LiveMapView:
         self._voxel_keys = set()
         self._voxel_xyz = array("f")
         self._z_range = [None, None]
-        self._ground_cache = None      # (体素数, 地面 z)，见 ground_level()
+        self._ground_cache = None      # (体素数, 机器人格, 地面 z)，见 ground_level()
+        # 机器人当前 xy，由节点从 LIO 里程计喂进来。地面只在它周围找 ——
+        # 全图最密的平面未必是机器人脚下那块（站在高台、台阶口就会认错）。
+        self.robot_xy = None
+        self.robot_z = None
+        self.ground_radius = 6.0
+        # 雷达装机高度（米，卷尺实测）。地面 = 机器人当前 z - 这个值。
+        self.lidar_height = 0.0
         self.lock = threading.Lock()
         self.last_cloud_time = 0.0
         self.cloud_count = 0
@@ -399,16 +406,35 @@ class LiveMapView:
         地面是场景里最大的连续平面，它的点几乎全落进同一个 z 桶里，
         而墙面会摊在两三米的高度上，所以直方图峰值稳稳落在地面。
         """
+        # 首选：机器人当前高度 - 雷达装机高度。
+        # LIO 对 z 的估计是可靠的，装机高度又是卷尺能量准的物理常数，
+        # 两者一减就是"机器人脚下的地面"，不用去猜哪一层最密 —— 上下台阶、
+        # 站在高台上也都跟得住，而按密度找会认成场地里最大的那个平面。
+        if self.robot_z is not None and self.lidar_height > 0.0:
+            return float(self.robot_z) - float(self.lidar_height)
+
+        # 兜底：还没收到位姿时用直方图峰值。地面通常是场景里最大的连续平面，
+        # 点几乎全落进同一个 5cm 桶，而墙面摊在两三米高度上。
         if np is None:
             return None
         with self.lock:
             n = len(self._voxel_xyz) // 3
             if n < 200:
                 return None
-            # 体素只增不减，涨幅不到 5% 就沿用上次结果，别每 700ms 重算一遍
-            if self._ground_cache and n - self._ground_cache[0] < max(200, n * 0.05):
-                return self._ground_cache[1]
-            zs = np.frombuffer(memoryview(self._voxel_xyz), dtype=np.float32)[2::3]
+            rxy = self.robot_xy
+            # 机器人走出 2m 就重算（换楼层/上下台阶时地面会变），否则按体素涨幅缓存
+            cell = (round(rxy[0] / 2.0), round(rxy[1] / 2.0)) if rxy else None
+            cache = self._ground_cache
+            if cache and cache[1] == cell and n - cache[0] < max(200, n * 0.05):
+                return cache[2]
+            flat = np.frombuffer(memoryview(self._voxel_xyz), dtype=np.float32)
+            pts = flat[: n * 3].reshape(-1, 3)
+            zs = pts[:, 2]
+            if rxy is not None:
+                near = (np.abs(pts[:, 0] - rxy[0]) <= self.ground_radius) & \
+                       (np.abs(pts[:, 1] - rxy[1]) <= self.ground_radius)
+                if int(near.sum()) >= 200:      # 附近点够多才用局部，否则退回全图
+                    zs = zs[near]
             lo, hi = float(zs.min()), float(zs.max())
             if not (hi > lo):
                 return None
@@ -416,8 +442,38 @@ class LiveMapView:
             counts, edges = np.histogram(zs, bins=bins, range=(lo, hi))
             peak = int(np.argmax(counts))
             ground = float((edges[peak] + edges[peak + 1]) * 0.5)
-            self._ground_cache = (n, ground)
+            self._ground_cache = (n, cell, ground)
             return ground
+
+    def z_profile(self, top=6, bin_size=0.10):
+        """z 方向的分层剖面：返回点最密的几层及其占比。
+
+        用来判断"地面到底在哪一层"。地面、天花板、桌面、镜面反射在
+        z 直方图上都是峰，光看一个估计值分不出谁是谁 —— 把前几名连同
+        高度和占比一起列出来，一眼就能对上现场的实际结构。
+        """
+        if np is None:
+            return []
+        with self.lock:
+            n = len(self._voxel_xyz) // 3
+            if n < 200:
+                return []
+            zs = np.frombuffer(memoryview(self._voxel_xyz), dtype=np.float32)[2::3]
+        lo, hi = float(zs.min()), float(zs.max())
+        if not (hi > lo):
+            return []
+        bins = max(8, min(600, int(round((hi - lo) / float(bin_size)))))
+        counts, edges = np.histogram(zs, bins=bins, range=(lo, hi))
+        order = np.argsort(counts)[::-1][:int(top)]
+        total = float(len(zs))
+        return [
+            {
+                "z": round(float((edges[i] + edges[i + 1]) * 0.5), 3),
+                "count": int(counts[i]),
+                "ratio": round(float(counts[i]) / total, 4),
+            }
+            for i in sorted(order.tolist(), key=lambda i: -counts[i])
+        ]
 
     def cloud_since(self, since=0, max_points=60000):
         """增量取体素：返回 (float32 小端字节, 本次起始下标, 总数)。
@@ -471,6 +527,8 @@ class LiveMapView:
             # 地面在世界系里的 z。前端拿它把高度显示换算成离地高度，
             # 也是标定 lio.extrinsic.odom_robo 时"雷达离地多高"的现成读数。
             "ground_z": self.ground_level(),
+            # z 方向最密的几层，用来核对地面到底认对没有
+            "z_profile": self.z_profile(),
             # 建图为什么没数据 / 为什么糊，全靠这几项说清楚
             "cloud_frame": self.cloud_frame,
             "map_frame": self.map_frame,
@@ -730,6 +788,7 @@ class BridgeNode(Node):
             voxel_z_min=args.live_cloud_z_min, voxel_z_max=args.live_cloud_z_max,
             callback_group=self._group,
         )
+        self.live_map.lidar_height = float(args.lidar_height)
 
         # ── 相机中继（有 CompressedImage 话题就转发 JPEG，没有就显示占位） ──
         self.camera = CameraRelay(self, topic=args.camera_topic, callback_group=self._group)
@@ -805,6 +864,12 @@ class BridgeNode(Node):
             "pitch_deg": math.degrees(pitch),
         }
         self._lio_pose_time = time.time()
+        # 地面只在机器人周围找，所以要让实时视图知道机器人在哪。
+        # 用 getattr：这个订阅建得比 live_map 早，头几帧可能还没那个属性。
+        live = getattr(self, "live_map", None)
+        if live is not None:
+            live.robot_xy = (float(p.x), float(p.y))
+            live.robot_z = float(p.z)
 
     def current_pose(self):
         try:
@@ -2062,6 +2127,10 @@ def parse_args(argv=None):
                              "拦掉 LIO 未收敛时甩出的野点，否则高度配色会被撑爆")
     parser.add_argument("--live-cloud-z-max", type=float, default=6.0,
                         help="建图 3D 点云的离群上界（米，相对建图原点）")
+    parser.add_argument("--lidar-height", type=float, default=1.28,
+                        help="雷达装机高度（米，机器人直立站平地时雷达离地）。"
+                             "地面 = 机器人当前 z - 这个值。设 0 则退回按点云密度猜地面，"
+                             "那种办法在有高台/台阶的场地会认错层")
     parser.add_argument("--lio-odom-topic", default="/lio/odom",
                         help="super-lio 的里程计，建图阶段位姿只能从这里拿。"
                              "注意别用 /lio/robo/odom —— 基础镜像的 DDS 域桥会把宇树 "
