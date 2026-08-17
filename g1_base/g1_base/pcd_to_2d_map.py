@@ -216,6 +216,30 @@ def read_pcd(pcd_path):
         raise ValueError(f"不支持的 PCD DATA 类型: {info['data_type']}")
 
 
+def pick_ground_prior(points, lidar_height, band=GROUND_PRIOR_BAND_M):
+    """在 ±lidar_height 两侧各开一个窗数点，返回 (先验 z, up_sign)。
+
+    LIO 世界原点在起始时刻的雷达上，所以地面必在距原点 lidar_height 处 ——
+    但在 z 的哪一侧取决于世界系 Z 的朝向，而雷达倒装会让它朝下。
+    实测吃过亏：主平面在 -2.55m 被当成地面，算出"雷达离地 2.55m"，
+    而卷尺是 1.28m —— 那其实是天花板。所以两侧都数，不做假设。
+    找不到就返回 (None, 1.0)，让调用方退回无先验的老路。
+    """
+    if np is None or not lidar_height:
+        return None, 1.0
+    z = np.asarray(points, dtype=np.float64)[:, 2]
+    h = abs(float(lidar_height))
+    best, best_n = None, 0
+    for sign in (-1.0, 1.0):
+        n = int(np.count_nonzero(np.abs(z - sign * h) <= 0.15))
+        if n > best_n:
+            best, best_n = sign, n
+    if best is None or best_n < 64:
+        return None, 1.0
+    # 地面在 -z 侧 → 天空朝 +z；地面在 +z 侧 → 天空朝 -z
+    return best * h, -best
+
+
 def validate_ground_alignment(
     points,
     cell_size=GROUND_CHECK_CELL_SIZE_M,
@@ -223,6 +247,7 @@ def validate_ground_alignment(
     max_radius_m=GROUND_CHECK_MAX_RADIUS_M,
     ground_prior_z=None,
     prior_band=GROUND_PRIOR_BAND_M,
+    up_sign=1.0,
 ):
     if np is None:
         raise ImportError("numpy 未安装，请运行: pip3 install numpy")
@@ -280,14 +305,17 @@ def validate_ground_alignment(
         raise ValueError("地面法线计算失败")
 
     normal = normal / normal_norm
-    if normal[2] < 0.0:
+    # 法线要指向"天空"。默认认为 +z 朝上；但雷达倒装时 Super-LIO 的世界系
+    # Z 会朝下，这时 up_sign 传 -1，法线得指向 -z，否则算出来的离地高度全是
+    # 负的，障碍物一个都过不了筛。
+    if normal[2] * float(up_sign) < 0.0:
         normal = -normal
 
     # 内点到平面的 RMS：区分"整体歪了"和"地面根本不平"。
     # 前者 RMS 小、单纯是个倾斜，后者说明 LIO 漂了或场地本来就有高差。
     residual_rms = float(np.sqrt(np.mean(((fit_pts - plane_point) @ normal) ** 2)))
 
-    tilt_deg = math.degrees(math.acos(float(np.clip(normal[2], -1.0, 1.0))))
+    tilt_deg = math.degrees(math.acos(float(np.clip(abs(normal[2]), -1.0, 1.0))))
     alignment = GroundAlignment(
         point=plane_point,
         normal=normal,
@@ -380,8 +408,8 @@ def convert_pcd_to_2d_map(
     # 雷达装机高度是卷尺量得准的物理常数，而 LIO 世界原点就在起始时刻的雷达上，
     # 所以地面先验就是 -lidar_height。没有它，抛光地面的镜像层会把地面拟合
     # 整整拽低一个雷达高度（见 GROUND_PRIOR_BAND_M）。
-    prior = None if not lidar_height else -abs(float(lidar_height))
-    alignment = validate_ground_alignment(xyz, ground_prior_z=prior)
+    prior, up_sign = pick_ground_prior(xyz, lidar_height)
+    alignment = validate_ground_alignment(xyz, ground_prior_z=prior, up_sign=up_sign)
 
     # 沿地面法线的离地高度：障碍物过滤和地面识别都用它，和 LIO 原点在哪无关
     heights = (xyz - alignment.point) @ alignment.normal
@@ -563,13 +591,23 @@ def _inspect_ground(pcd_path, lidar_height=None):
 
     # 世界原点就在雷达上（LIO 以初始雷达位姿建系），所以原点到地面的距离
     # 就是雷达离地高度 —— 标定 lio.extrinsic.odom_robo 的 z 直接用它，不用卷尺。
-    prior = None if not lidar_height else -abs(float(lidar_height))
-    if prior is not None:
-        print(f"（已按 --lidar-height {lidar_height} m 施加地面先验 "
-              f"z≈{prior:.2f}±{GROUND_PRIOR_BAND_M} m，用于挡掉地板下方的镜面倒影）")
+    prior, up_sign = pick_ground_prior(xyz, lidar_height)
+    if prior is None:
+        print(f"\n在 ±{lidar_height} m 两侧都没找到稠密平面 —— 地面可能超出了 "
+              f"maxrange，或者 --lidar-height 给错了")
+    else:
+        h = abs(float(lidar_height))
+        n_lo = int(np.count_nonzero(np.abs(xyz[:, 2] + h) <= 0.15))
+        n_hi = int(np.count_nonzero(np.abs(xyz[:, 2] - h) <= 0.15))
+        print(f"\n地面判定（雷达离地 {lidar_height} m，两侧各数一个 ±0.15m 的窗）:")
+        print(f"    z = {-h:+.2f} m 处 {n_lo:7d} 点")
+        print(f"    z = {+h:+.2f} m 处 {n_hi:7d} 点")
+        print(f"  → 地面取 z={prior:+.2f} m，天空朝 {'+z' if up_sign > 0 else '-z'}"
+              f"{'（世界系 Z 朝下，雷达倒装的典型表现）' if up_sign < 0 else ''}")
     try:
-        a = validate_ground_alignment(xyz, max_tilt_deg=90.0, ground_prior_z=prior)
-        lidar_h = -float(np.dot(a.point, a.normal))
+        a = validate_ground_alignment(xyz, max_tilt_deg=90.0,
+                                      ground_prior_z=prior, up_sign=up_sign)
+        lidar_h = abs(float(np.dot(a.point, a.normal)))
         print(f"\n雷达离地高度 ≈ {lidar_h:.3f} m（世界原点到地面平面的距离）")
         print("  → lio.extrinsic.odom_robo 的第 3 个数（z）填 "
               f"{-lidar_h:.3f}，可把机器人位姿的原点落到地面")
