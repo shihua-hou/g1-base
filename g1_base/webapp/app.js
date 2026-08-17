@@ -536,6 +536,37 @@
     `;
   }
 
+  function defaultMapName() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    return `map_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
+  }
+
+  // 四个按钮的可用性只由「在不在建图」决定，每次状态刷新都重算一遍。
+  // 保存和清空都要读 map.pcd，而 super-lio 只在停止建图时才把点云落盘，
+  // 所以建图过程中这两个也锁上 —— 不然存下来的是上一次的图。
+  function syncMappingButtons() {
+    const navm = (state.status && state.status.navigation_manager) || {};
+    const known = !!navm.mode;
+    const mapping = navm.mode === "mapping";
+    const set = (id, disabled) => {
+      const el = document.getElementById(id);
+      if (el) el.disabled = disabled;
+    };
+    set("map-start", !known || mapping);
+    set("map-stop", !known || !mapping);
+    set("map-save", !known || mapping);
+    set("live-reset", !known || mapping);
+    const hint = document.getElementById("map-ctl-hint");
+    if (hint) {
+      hint.textContent = !known
+        ? "读取状态…"
+        : mapping
+          ? "建图中：走完场地后点「停止建图」"
+          : "保存地图 = 点云转 2D pgm 快照";
+    }
+  }
+
   function renderMapping(opts) {
     shell(opts, "cols-map-work", `
       <aside class="pane work-a">
@@ -564,25 +595,55 @@
       <aside class="pane work-d">
         <div class="pane-head"><div class="eyebrow">建图控制</div></div>
         <div class="pane-body" style="display:flex;flex-direction:column;gap:10px">
-          <button class="btn success block" id="map-start">开始建图</button>
-          <button class="btn warn block" id="map-stop">停止建图</button>
-          <button class="btn primary block" id="map-save">保存地图</button>
-          <button class="btn ghost block" id="live-reset">清空实时图</button>
+          <button class="btn success block" id="map-start" disabled>开始建图</button>
+          <button class="btn warn block" id="map-stop" disabled>停止建图</button>
+          <button class="btn primary block" id="map-save" disabled>保存地图</button>
+          <button class="btn ghost block" id="live-reset" disabled>清空点云</button>
         </div>
-        <div class="pane-foot"><span class="note" style="margin:0">保存地图 = 点云转 2D pgm 快照</span></div>
+        <div class="pane-foot"><span class="note" style="margin:0" id="map-ctl-hint">读取状态…</span></div>
       </aside>
       ${stickPaneHtml("turn")}
     `);
 
-    const bind = (id, path, msg) => document.getElementById(id)
-      .addEventListener("click", () => guarded(() => api(path, { method: "POST" }), msg));
-    bind("map-start", "/api/map/start_mapping", "已开始建图");
-    bind("map-stop", "/api/map/stop_mapping", "已停止建图，点云保存中");
-    bind("map-save", "/api/map/generate_2d", "已触发生成 2D 地图");
+    // 开始/停止：成功后先按预期把按钮翻过来，1.5 秒后的状态轮询会再校正一次。
+    // 不这么做的话点完按钮要愣一下才变灰，现场会以为没点上又点一次。
+    const bindMode = (id, path, msg, optimistic) => document.getElementById(id)
+      .addEventListener("click", async () => {
+        const el = document.getElementById(id);
+        el.disabled = true;                            // 防连点
+        try {
+          await guarded(() => api(path, { method: "POST" }), msg);
+          const navm = (state.status && state.status.navigation_manager) || {};
+          navm.mode = optimistic;
+          if (state.status) state.status.navigation_manager = navm;
+        } catch (_e) { /* toast 里已经报过了 */ }
+        syncMappingButtons();
+      });
+    bindMode("map-start", "/api/map/start_mapping", "已开始建图", "mapping");
+    bindMode("map-stop", "/api/map/stop_mapping", "已停止建图，点云保存中", "navigation");
+
+    // 保存地图：起个名字 → 后端把 map.pcd 投成 2D 栅格存进地图目录
+    document.getElementById("map-save").addEventListener("click", async () => {
+      const name = prompt("地图名称（字母 / 数字 / 下划线）：", defaultMapName());
+      if (name === null) return;                       // 用户取消
+      const res = await guarded(
+        () => api("/api/map/save", { method: "POST", body: { name: name.trim() } }),
+        "地图已保存",
+      ).catch(() => null);
+      if (res) nav("map/list");                        // 直接跳去列表，省得自己找
+    });
+
+    // 清空点云：连同本次建图落盘的 pcd 一起删，否则下次保存会存到旧点云
     document.getElementById("live-reset").addEventListener("click", async () => {
-      await guarded(() => api("/api/map/live/reset", { method: "POST" }), "实时图已清空");
+      if (!confirm("清空点云？\n\n会删除本次建图产生的 map.pcd 和分片文件。\n已保存进地图列表的地图不受影响。")) return;
+      await guarded(
+        () => api("/api/map/live/reset", { method: "POST", body: { purge_pcd: true } }),
+        "点云已清空",
+      ).catch(() => null);
       if (mapCloud) mapCloud.clear();
     });
+
+    syncMappingButtons();
 
     mountTeleopSticks();
     startLiveCloud();
@@ -650,6 +711,7 @@
         const info = await api("/api/map/live");
         const statusEl = document.getElementById("mapping-status");
         if (statusEl) statusEl.innerHTML = mappingStatusHtml(info);
+        syncMappingButtons();
         // 提示条归当前显示的那个视图用：3D 时由点云的 onStats 写，别互相覆盖
         const gridVisible = !document.getElementById("live-map").hidden;
         if (hint && (gridVisible || !info.streaming)) {

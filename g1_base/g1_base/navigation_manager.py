@@ -1029,8 +1029,19 @@ class NavigationManager(Node):
     # ── 2D 地图生成 ──
 
     def _resolve_map_pcd_path(self):
-        """定位 map.pcd 路径（Super-LIO 标准位置）。"""
-        candidates = [
+        """定位 map.pcd 路径（Super-LIO 标准位置）。
+
+        容器里 Super-LIO 装在 $LIO_WORKSPACE_ROOT（/root/lio_ws），
+        不在下面两个裸机历史位置下，所以先认环境变量再退回历史路径 ——
+        否则停止建图后的自动 2D 生成会报 "map.pcd not found"。
+        """
+        candidates = []
+        lio_root = os.environ.get("LIO_WORKSPACE_ROOT", "").strip()
+        if lio_root:
+            candidates.append(
+                Path(lio_root).expanduser() / "src" / "Super-LIO" / "src" / "super_lio" / "map" / "map.pcd"
+            )
+        candidates += [
             Path.home() / "ros2_ws" / "src" / "Super-LIO" / "src" / "super_lio" / "map" / "map.pcd",
             Path.home() / "Super-LIO" / "src" / "super_lio" / "map" / "map.pcd",
         ]

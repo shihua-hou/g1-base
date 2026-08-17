@@ -999,6 +999,114 @@ def halls_dir():
     return Path(package_share_dir()) / "config" / "halls"
 
 
+# 地图名允许的字符：要当文件名用，也要能安全塞进 URL
+_MAP_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,48}$")
+
+
+def lio_map_dir():
+    """Super-LIO 的存图目录。
+
+    Super-LIO 把 map.pcd 写到编译期宏 ROOT 指定的位置（见
+    docker/lio/livox_360.yaml 的注释），容器里 start_g1_base.sh
+    已把它软链到数据卷。这里按 LIO_WORKSPACE_ROOT 优先解析，
+    解析不到再退回裸机上的两个历史位置。
+    """
+    candidates = []
+    root = os.environ.get("LIO_WORKSPACE_ROOT", "").strip()
+    if root:
+        candidates.append(Path(root).expanduser() / "src" / "Super-LIO" / "src" / "super_lio" / "map")
+    candidates += [
+        Path.home() / "ros2_ws" / "src" / "Super-LIO" / "src" / "super_lio" / "map",
+        Path.home() / "Super-LIO" / "src" / "super_lio" / "map",
+    ]
+    for c in candidates:
+        if c.is_dir():
+            return c
+    return candidates[0]
+
+
+def save_live_map(name):
+    """把本次建图的 map.pcd 转成 2D 栅格快照，按用户起的名字落进地图目录。
+
+    命名沿用地图列表的约定（<name>_exhibit_2d_map.yaml/.pgm + <name>_map.pcd），
+    存完立刻能在「地图列表」里看到并激活。
+    """
+    name = (name or "").strip()
+    if not name:
+        raise ApiError("请填写地图名称", 400)
+    if not _MAP_NAME_RE.match(name):
+        raise ApiError("地图名称只能用字母、数字、下划线、连字符，最长 48 位", 400)
+
+    src = lio_map_dir() / "map.pcd"
+    if not src.is_file():
+        raise ApiError("没找到 map.pcd。先「开始建图」走一圈，再「停止建图」把点云落盘", 404)
+
+    maps_dir = resolve_maps_dir()
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    yaml_path = maps_dir / f"{name}_{MAP_NAME_SUFFIX}.yaml"
+    if yaml_path.exists():
+        raise ApiError(f"地图「{name}」已存在，换个名字", 409)
+
+    from g1_base.pcd_to_2d_map import (
+        LEGACY_Z_MAX,
+        LEGACY_Z_MIN,
+        TiltedWorldError,
+        convert_pcd_to_2d_map,
+    )
+
+    # 先把 PCD 收进地图目录再转换：转换器按 pcd 所在目录写产物，
+    # 而且原始点云要跟快照一起留档（重定位和以后重新投影都要用）
+    pcd_target = maps_dir / f"{name}_map.pcd"
+    shutil.copy2(src, pcd_target)
+    try:
+        pgm, yaml_f = convert_pcd_to_2d_map(
+            pcd_path=str(pcd_target),
+            output_dir=str(maps_dir),
+            output_name=f"{name}_{MAP_NAME_SUFFIX}",
+            z_min=LEGACY_Z_MIN,
+            z_max=LEGACY_Z_MAX,
+        )
+    except TiltedWorldError as exc:
+        pcd_target.unlink(missing_ok=True)
+        raise ApiError(
+            f"地面不水平（倾斜 {exc.tilt_deg:.1f}°），投成 2D 会失真。"
+            "多半是建图起步时机器人没站稳，重建一次试试", 422)
+    except Exception as exc:
+        pcd_target.unlink(missing_ok=True)
+        raise ApiError(f"生成 2D 地图失败：{exc}", 500)
+
+    return {
+        "ok": True,
+        "id": f"snapshot:{name}",
+        "name": name,
+        "pgm": str(pgm),
+        "yaml": str(yaml_f),
+        "pcd": str(pcd_target),
+    }
+
+
+def clear_lio_pcd():
+    """删掉本次建图产生的点云文件（map.pcd + PCD/ 分片）。
+
+    只动 Super-LIO 的工作目录，已保存进地图目录的快照不受影响。
+    """
+    d = lio_map_dir()
+    removed = []
+    f = d / "map.pcd"
+    if f.is_file():
+        f.unlink()
+        removed.append("map.pcd")
+    frag_dir = d / "PCD"
+    if frag_dir.is_dir():
+        n = 0
+        for frag in frag_dir.glob("*.pcd"):
+            frag.unlink()
+            n += 1
+        if n:
+            removed.append(f"PCD 分片 × {n}")
+    return removed
+
+
 def routes_dir():
     return data_dir("routes")
 
@@ -1740,7 +1848,12 @@ def make_handler(node: BridgeNode):
                 extra = {"X-Map-Geometry": json.dumps(geometry, separators=(",", ":"))}
                 return self._send_bytes(png, "image/png", cache="no-store", extra_headers=extra)
             if method == "POST" and path == "/api/map/live/reset":
-                return self._send_json(node.live_map.reset())
+                out = node.live_map.reset()
+                # 「清空点云」不只是清屏：本次建图落盘的 pcd 也一并删掉，
+                # 否则下次「保存地图」会把上一次的点云当成新图存下来。
+                if body.get("purge_pcd"):
+                    out["removed"] = clear_lio_pcd()
+                return self._send_json(out)
 
             # ---- 相机 ----
             if method == "GET" and path == "/api/camera/info":
@@ -1751,6 +1864,9 @@ def make_handler(node: BridgeNode):
                     raise ApiError("暂无相机画面", 404)
                 ctype = "image/png" if "png" in (fmt or "").lower() else "image/jpeg"
                 return self._send_bytes(frame, ctype, cache="no-store")
+
+            if method == "POST" and path == "/api/map/save":
+                return self._send_json(save_live_map(body.get("name")))
 
             if method == "POST" and path == "/api/map/generate_2d":
                 resp = node.call_service(node.cli_generate_2d_map, Trigger.Request(), timeout=60.0, name="generate_2d_map")
