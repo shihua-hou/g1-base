@@ -59,9 +59,11 @@ except ImportError:  # pragma: no cover - 缺这些只影响实时地图与相�
 
 try:
     # 注意别和 pathlib.Path 撞名
+    from nav_msgs.msg import Odometry
     from nav_msgs.msg import Path as NavPath
-except ImportError:  # pragma: no cover - 缺它只影响地图上的规划路径
+except ImportError:  # pragma: no cover - 缺它只影响地图上的规划路径与建图位姿
     NavPath = None
+    Odometry = None
 
 from g1_base.common import config_file, movement_dir, package_share_dir
 from g1_base_interfaces.action import NavigateToTarget
@@ -195,6 +197,7 @@ class LiveMapView:
         self._voxel_keys = set()
         self._voxel_xyz = array("f")
         self._z_range = [None, None]
+        self._ground_cache = None      # (体素数, 地面 z)，见 ground_level()
         self.lock = threading.Lock()
         self.last_cloud_time = 0.0
         self.cloud_count = 0
@@ -334,6 +337,28 @@ class LiveMapView:
             self._z_range[0] = lo if self._z_range[0] is None else min(self._z_range[0], lo)
             self._z_range[1] = hi if self._z_range[1] is None else max(self._z_range[1], hi)
 
+    def ground_level(self):
+        """估计地面在世界系里的 z，用来把 3D 视图的高度显示改成"离地高度"。
+
+        LIO 的世界原点在雷达上（雷达装在头上，离地一米多），所以点云里
+        z=0 是雷达高度而不是地面 —— 看图的人会以为机器人陷在地里。
+        取 z 的 2% 分位数当地面：比最小值稳（挡得住零星穿地的野点），
+        又比中位数低得多（中位数会落在墙面上）。
+        """
+        if np is None:
+            return None
+        with self.lock:
+            n = len(self._voxel_xyz) // 3
+            if n < 200:
+                return None
+            # 体素只增不减，涨幅不到 5% 就沿用上次结果，别每 700ms 排一次序
+            if self._ground_cache and n - self._ground_cache[0] < max(200, n * 0.05):
+                return self._ground_cache[1]
+            zs = np.frombuffer(memoryview(self._voxel_xyz), dtype=np.float32)[2::3]
+            ground = float(np.percentile(zs, 2.0))
+            self._ground_cache = (n, ground)
+            return ground
+
     def cloud_since(self, since=0, max_points=60000):
         """增量取体素：返回 (float32 小端字节, 本次起始下标, 总数)。
 
@@ -380,6 +405,9 @@ class LiveMapView:
             "voxel_count": voxels,
             "z_min": zlo,
             "z_max": zhi,
+            # 地面在世界系里的 z。前端拿它把高度显示换算成离地高度，
+            # 也是标定 lio.extrinsic.odom_robo 时"雷达离地多高"的现成读数。
+            "ground_z": self.ground_level(),
             # 建图为什么没数据 / 为什么糊，全靠这几项说清楚
             "cloud_frame": self.cloud_frame,
             "map_frame": self.map_frame,
@@ -616,6 +644,16 @@ class BridgeNode(Node):
         #    set_manual_velocity(timeout) 兜住看门狗，网页断了机器人自己停 ──
         self.pub_teleop = self.create_publisher(Twist, TELEOP_TOPIC, 10)
 
+        # ── 建图时的机器人位姿 ──
+        # 这时候 Nav2 那套还没起，TF 里没有 base_link，只能从 LIO 直接拿
+        self._lio_pose = None
+        self._lio_pose_time = 0.0
+        if Odometry is not None:
+            self.create_subscription(
+                Odometry, args.lio_odom_topic, self._on_lio_odom,
+                QoSPresetProfiles.SENSOR_DATA.value, callback_group=self._group,
+            )
+
         # ── 建图实时视图：直接吃 super-lio 的世界点云，自己攒栅格 ──
         self.live_map = LiveMapView(
             self, cloud_topic=args.cloud_topic, resolution=args.live_map_resolution,
@@ -686,17 +724,34 @@ class BridgeNode(Node):
         with self._status_lock:
             self._nav_manager_status = data
 
+    def _on_lio_odom(self, msg):
+        p = msg.pose.pose.position
+        q = msg.pose.pose.orientation
+        self._lio_pose = {
+            "x": float(p.x), "y": float(p.y), "z": float(p.z),
+            "yaw": _yaw_from_quaternion(q.z, q.w),
+        }
+        self._lio_pose_time = time.time()
+
     def current_pose(self):
         try:
             tf = self.tf_buffer.lookup_transform(
                 self.args.map_frame, self.args.base_frame, rclpy.time.Time()
             )
+            t = tf.transform.translation
+            q = tf.transform.rotation
+            yaw = _yaw_from_quaternion(q.z, q.w)
+            return {"x": t.x, "y": t.y, "yaw": yaw,
+                    "yaw_deg": math.degrees(yaw), "source": "tf"}
         except TransformException:
-            return None
-        t = tf.transform.translation
-        q = tf.transform.rotation
-        yaw = _yaw_from_quaternion(q.z, q.w)
-        return {"x": t.x, "y": t.y, "yaw": yaw, "yaw_deg": math.degrees(yaw)}
+            pass
+        # 建图阶段没有 odom_to_tf，TF 树只有 map->world->imu，查不到 base_link。
+        # 页面上会一直显示"无 TF"，3D 视图里也画不出机器人。
+        # 直接拿 super-lio 的机器人里程计兜底 —— 建图时它就是唯一的位姿来源。
+        pose = self._lio_pose
+        if pose and (time.time() - self._lio_pose_time) < 3.0:
+            return {**pose, "yaw_deg": math.degrees(pose["yaw"]), "source": "lio"}
+        return None
 
     def snapshot_status(self):
         with self._status_lock:
@@ -1835,6 +1890,9 @@ def make_handler(node: BridgeNode):
                 if zlo is not None:
                     self.send_header("X-Cloud-Zmin", f"{zlo:.3f}")
                     self.send_header("X-Cloud-Zmax", f"{zhi:.3f}")
+                ground = node.live_map.ground_level()
+                if ground is not None:
+                    self.send_header("X-Cloud-Ground", f"{ground:.3f}")
                 self.end_headers()
                 self.wfile.write(payload)
                 return
@@ -1927,6 +1985,9 @@ def parse_args(argv=None):
                              "拦掉 LIO 未收敛时甩出的野点，否则高度配色会被撑爆")
     parser.add_argument("--live-cloud-z-max", type=float, default=6.0,
                         help="建图 3D 点云的离群上界（米，相对建图原点）")
+    parser.add_argument("--lio-odom-topic", default="/lio/robo/odom",
+                        help="super-lio 的机器人里程计。建图阶段没有 map->base_link，"
+                             "位姿只能从这里拿")
     parser.add_argument("--plan-topic", default="/plan",
                         help="nav_msgs/Path 话题，用于在网页地图上画规划路径")
     # 摇杆速度上限

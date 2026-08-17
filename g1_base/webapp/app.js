@@ -529,7 +529,12 @@
         ${kvHtml("点云帧", l.cloud_count != null ? String(l.cloud_count) : "—")}
         ${kvHtml("已建栅格", l.cell_count != null ? String(l.cell_count) : "—")}
         ${kvHtml("地图范围", extent)}
-        ${kvHtml("当前位姿", pose ? `${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}` : "无 TF", pose ? "" : "is-dim")}
+        ${kvHtml("当前位姿", pose ? `${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}` : "无位姿",
+                 pose ? "" : "is-dim")}
+        ${kvHtml("位姿来源", pose ? (pose.source === "lio" ? "super-lio 里程计" : "TF") : "—",
+                 pose ? "" : "is-dim")}
+        ${kvHtml("雷达离地", l.ground_z != null ? `${(-l.ground_z).toFixed(2)} m` : "—",
+                 l.ground_z != null ? "" : "is-dim")}
         ${kvHtml("分辨率", l.resolution ? l.resolution + " m/px" : "—")}
       </div>
       <p class="note">开始建图后用下方摇杆把场地走一遍；停止建图会保存点云，再点「保存地图」生成 2D 栅格快照，之后在「地图列表」里激活。</p>
@@ -671,17 +676,24 @@
     document.getElementById("cloud-legend").hidden = false;
     mapCloud = window.G1MapCloud.create(host, {
       baseUrl: state.baseUrl,
-      onStats: ({ shown, total, zmin, zmax }) => {
+      onStats: ({ shown, total, zmin, zmax, ground }) => {
+        // 一律显示离地高度：LIO 原点在雷达（装在头上，离地一米多），
+        // 直接报 z 的话地面会是 -1.1m 这种负数，看着像机器人陷在地里。
+        // ground 拿不到时退回原始 z，并在图例上标出来，免得读错。
+        const g = (ground === null || ground === undefined || !isFinite(ground)) ? null : ground;
+        const base = g === null ? 0 : g;
+        const lo = zmin - base;
+        const hi = zmax - base;
         const hint = document.getElementById("live-map-hint");
         // 提示条归当前视图用；切到 2D 时别再抢着写点云的数字
         if (hint && !host.hidden) {
           hint.textContent = total
-            ? `${shown.toLocaleString()} / ${total.toLocaleString()} 体素 · 高度 ${zmin.toFixed(1)}~${zmax.toFixed(1)} m`
+            ? `${shown.toLocaleString()} / ${total.toLocaleString()} 体素 · ${g === null ? "高度" : "离地"} ${lo.toFixed(1)}~${hi.toFixed(1)} m`
             : "等待点云…";
         }
-        const lo = document.getElementById("legend-lo");
-        const hi = document.getElementById("legend-hi");
-        if (lo && total) { lo.textContent = `${zmin.toFixed(1)}m`; hi.textContent = `${zmax.toFixed(1)}m`; }
+        const loEl = document.getElementById("legend-lo");
+        const hiEl = document.getElementById("legend-hi");
+        if (loEl && total) { loEl.textContent = `${lo.toFixed(1)}m`; hiEl.textContent = `${hi.toFixed(1)}m`; }
       },
     });
     if (!mapCloud) return;

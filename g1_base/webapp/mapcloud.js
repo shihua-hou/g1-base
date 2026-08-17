@@ -225,12 +225,16 @@
             const zmin = parseFloat(res.headers.get("X-Cloud-Zmin") || "0");
             const zmax = parseFloat(res.headers.get("X-Cloud-Zmax") || "1");
             const voxel = parseFloat(res.headers.get("X-Cloud-Voxel") || "0.08");
+            // 地面在世界系里的 z。LIO 原点在雷达上（装在头上，离地一米多），
+            // 直接报 z 会让人以为机器人陷在地里，所以统一换算成离地高度。
+            const groundHdr = res.headers.get("X-Cloud-Ground");
+            const ground = groundHdr === null ? null : parseFloat(groundHdr);
             const buf = await res.arrayBuffer();
             if (buf.byteLength) this._append(new Float32Array(buf), zmin, zmax);
             this.cursor = end;
             this.points.material.size = Math.max(0.02, voxel * 0.9);
             if (this.onStats) {
-              this.onStats({ shown: this.count, total, zmin, zmax, voxel });
+              this.onStats({ shown: this.count, total, zmin, zmax, voxel, ground });
             }
             // 还没追上就立刻再拉一次，首次进页面能快速把已有的图铺出来
             if (end < total && !this.disposed) { this._busy = false; return pull(); }

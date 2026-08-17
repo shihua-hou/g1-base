@@ -535,6 +535,17 @@ def _inspect_ground(pcd_path):
             print(f"{label:>10}  失败: {exc}")
     print(f"\n当前生效阈值 MAX_WORLD_TILT_DEG = {MAX_WORLD_TILT_DEG}°，"
           f"拟合半径 = {GROUND_CHECK_MAX_RADIUS_M} m")
+
+    # 世界原点就在雷达上（LIO 以初始雷达位姿建系），所以原点到地面的距离
+    # 就是雷达离地高度 —— 标定 lio.extrinsic.odom_robo 的 z 直接用它，不用卷尺。
+    try:
+        a = validate_ground_alignment(xyz, max_tilt_deg=90.0)
+        lidar_h = -float(np.dot(a.point, a.normal))
+        print(f"\n雷达离地高度 ≈ {lidar_h:.3f} m（世界原点到地面平面的距离）")
+        print("  → lio.extrinsic.odom_robo 的第 3 个数（z）填 "
+              f"{-lidar_h:.3f}，可把机器人位姿的原点落到地面")
+    except Exception as exc:
+        print(f"\n雷达离地高度: 算不出（{exc}）")
     return 0
 
 
