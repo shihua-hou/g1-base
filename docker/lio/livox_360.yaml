@@ -31,8 +31,17 @@
     lio.ros.imu_topic: "/livox/imu"
 
     lio.sensor.lidar_type: 1
-    lio.sensor.blind: 2.0
-    lio.sensor.maxrange: 60.0
+    # 盲区半径。上游 2.0m 是户外/车载的值，室内太狠：雷达装在 1.32m 高，
+    # 2m 斜距对应地面约 1.5m 半径，等于机器人脚下一圈的地板永远看不到，
+    # 而地板正是判定"可通行"的依据。降到 1.0m —— 头部支架肯定在 0.5m 以内，
+    # 留一倍余量。改完务必按 README 的办法验一次支架有没有混进点云。
+    lio.sensor.blind: 1.0
+    # 最大有效距离。上游 60m 会把整个场馆的远景都扫进来：实测站着不动就能
+    # 出 90×100m 的图，而真正走过的区域只占中间一小块，存出来的 pgm 绝大部分
+    # 是未知区域。远处点又稀又不准（掠射角 + 弱回波），对配准也是负担。
+    # 收到 8m：地图范围贴着实际走过的路线长，密度和精度都上一个台阶。
+    # 场馆特别开阔、8m 打不到墙的话可以放到 12~15。
+    lio.sensor.maxrange: 8.0
     lio.sensor.filter_rate: 3
     lio.sensor.enable_downsample: true
     lio.sensor.voxel_fliter_size: 0.5
@@ -48,11 +57,20 @@
                               1.0, 0.0, 0.0,
                               0.0, 1.0, 0.0,
                               0.0, 0.0, 1.0]
-    # [x, y, z, roll, pitch, yaw]：LIO 原点 -> 机器人基座。
-    # 全零 = 认为机器人基座就在雷达/IMU 处。
-    # 这一项【不影响建图质量】，只影响 /lio/robo/odom 报出来的位姿原点，
-    # 表现为"机器人在地图里悬空 ~1.1m"。等实测了 MID360 在 G1 上的安装高度再填。
-    lio.extrinsic.odom_robo: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    # [x, y, z, roll°, pitch°, yaw°]：LIO 原点 -> 机器人基座。角度是【度】不是弧度
+    # （ROSWrapper.cpp:108 有 /180*PI）。
+    #
+    # z = -1.28：卷尺实测雷达离地 1.28m（地面拟合算出 1.322m，差的 4cm 是
+    #   卷尺量到外壳、而拟合给的是 IMU 光心，以实测为准）。填负值把机器人
+    #   位姿的原点从雷达降到地面。
+    # roll = 180：实测雷达姿态横滚 178.6°，说明 MID360 是【倒装】的。
+    #   这里填正的 180 —— 代码里会取转置(ROSWrapper.cpp:116)，正好抵消。
+    # pitch = -2.4：实测俯仰 2.4°，取反号，同上。
+    # x/y = 0：雷达基本在躯干中轴线上。
+    #
+    # 注意这一项【不影响建图质量】（世界系已由 IMU 做重力对齐），
+    # 只影响 /lio/robo/odom 报出来的位姿原点与姿态。
+    lio.extrinsic.odom_robo: [0.0, 0.0, -1.28, 180.0, -2.4, 0.0]
 
     lio.hash_map.hash_capacity: 2000000
     lio.hash_map.vox_resolution: 0.5

@@ -211,7 +211,13 @@ class LiveMapView:
         self.tf_ok = False
         self.dropped_no_tf = 0
         self.tf_error = ""
+        # 2D 预览的高度带，全部相对地面（不是相对 LIO 原点 —— 原点在雷达上，
+        # 差着一米多）。数值与 pcd_to_2d_map 保持一致，预览才等于存出来的图。
+        self.obstacle_min_h = 0.15
+        self.obstacle_max_h = 1.60
+        self.ground_band = 0.12
         self.cells = set()
+        self.free_cells = set()
         # 3D 点云：按体素去重后按到达顺序追加，前端用下标做游标增量拉取
         self._voxel_keys = set()
         self._voxel_xyz = array("f")
@@ -236,6 +242,7 @@ class LiveMapView:
             arr = pc2.read_points(msg, field_names=("x", "y", "z"), skip_nans=True)
             res = self.resolution
             new_cells = set()
+            new_free = set()
             xyz_all = None
             if np is not None and isinstance(arr, np.ndarray):
                 xyz_all = np.column_stack([arr["x"], arr["y"], arr["z"]]).astype(np.float64)
@@ -245,12 +252,30 @@ class LiveMapView:
                         self.last_cloud_time = time.time()
                         self.cloud_count += 1
                     return
-                # 2D 栅格只要机器人能撞到的高度层，3D 视图用整帧（见 _accumulate_voxels）
-                xyz = xyz_all[(xyz_all[:, 2] >= self.z_min) & (xyz_all[:, 2] <= self.z_max)]
+                # 2D 栅格只要机器人能撞到的高度层，3D 视图用整帧（见 _accumulate_voxels）。
+                # 高度带优先按地面算 —— 用绝对 z 的话等于在扫离地 1~3m 那一层，
+                # 跟「保存地图」出来的结果完全对不上。地面还没估出来时才退回绝对 z。
+                zz = xyz_all[:, 2]
+                ground_z = self.ground_level()
+                if ground_z is None:
+                    lo, hi, glo, ghi = self.z_min, self.z_max, None, None
+                else:
+                    lo = ground_z + self.obstacle_min_h
+                    hi = ground_z + self.obstacle_max_h
+                    glo = ground_z - self.ground_band
+                    ghi = ground_z + self.ground_band
+                xyz = xyz_all[(zz >= lo) & (zz <= hi)]
                 if xyz.shape[0]:
                     cols = np.floor(xyz[:, 0] / res).astype(np.int32)
                     rows = np.floor(xyz[:, 1] / res).astype(np.int32)
                     new_cells = set(zip(cols.tolist(), rows.tolist()))
+                # 打到地板 = 那条光路上没东西 = 可通行，和离线出图同一套判据
+                if glo is not None:
+                    gp = xyz_all[(zz >= glo) & (zz <= ghi)]
+                    if gp.shape[0]:
+                        gc = np.floor(gp[:, 0] / res).astype(np.int32)
+                        grw = np.floor(gp[:, 1] / res).astype(np.int32)
+                        new_free = set(zip(gc.tolist(), grw.tolist()))
             else:
                 for x, y, z in arr:
                     if self.z_min <= z <= self.z_max:
@@ -260,6 +285,8 @@ class LiveMapView:
                 self.cloud_count += 1
                 if len(self.cells) < self.HARD_CAP_CELLS:
                     self.cells.update(new_cells)
+                if len(self.free_cells) < self.HARD_CAP_CELLS:
+                    self.free_cells.update(new_free)
             self._accumulate_voxels(xyz_all)
         except Exception as exc:
             self.node.get_logger().warning(f"live map cloud error: {exc}", throttle_duration_sec=5.0)
@@ -398,11 +425,14 @@ class LiveMapView:
     def reset(self):
         with self.lock:
             self.cells = set()
+            self.free_cells = set()
             self.cloud_count = 0
             self._voxel_keys = set()
             self._voxel_xyz = array("f")
             self._z_range = [None, None]
+            self._ground_cache = None
             self.dropped_no_tf = 0
+            self.dropped_outlier = 0
         return {"success": True, "message": "实时地图已清空"}
 
     def info(self):
@@ -441,11 +471,13 @@ class LiveMapView:
         """渲染成 PNG，返回 (png_bytes, geometry)。没有点云时返回 (None, None)。"""
         with self.lock:
             cells = self.cells.copy()
-        if not cells:
+            free = self.free_cells.copy()
+        if not cells and not free:
             return None, None
 
-        cols = [c for c, _ in cells]
-        rows = [r for _, r in cells]
+        allc = cells | free
+        cols = [c for c, _ in allc]
+        rows = [r for _, r in allc]
         pad = int(round(1.0 / self.resolution))
         col_min, col_max = min(cols) - pad, max(cols) + pad
         row_min, row_max = min(rows) - pad, max(rows) + pad
@@ -456,13 +488,16 @@ class LiveMapView:
         out_w = max(1, width // scale)
         out_h = max(1, height // scale)
 
-        # 未知=205（与 nav2 的 PGM 约定一致），占据=0
+        # 未知=205、自由=254、占据=0，与 nav2 的 PGM 约定一致。
+        # 先铺自由区再压障碍，和 pcd_to_2d_map 同一个顺序 ——
+        # 这样这张实时预览就等于「保存地图」会得到的结果。
         buf = bytearray(b"\xcd" * (out_w * out_h))
-        for c, r in cells:
-            ox = (c - col_min) // scale
-            oy = (row_max - r) // scale          # 行翻转：世界 y 向上，图像 y 向下
-            if 0 <= ox < out_w and 0 <= oy < out_h:
-                buf[oy * out_w + ox] = 0
+        for src, val in ((free, 254), (cells, 0)):
+            for c, r in src:
+                ox = (c - col_min) // scale
+                oy = (row_max - r) // scale      # 行翻转：世界 y 向上，图像 y 向下
+                if 0 <= ox < out_w and 0 <= oy < out_h:
+                    buf[oy * out_w + ox] = val
 
         geometry = {
             "width": width,
