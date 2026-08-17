@@ -738,11 +738,15 @@ class BridgeNode(Node):
             tf = self.tf_buffer.lookup_transform(
                 self.args.map_frame, self.args.base_frame, rclpy.time.Time()
             )
-            t = tf.transform.translation
-            q = tf.transform.rotation
-            yaw = _yaw_from_quaternion(q.z, q.w)
-            return {"x": t.x, "y": t.y, "yaw": yaw,
-                    "yaw_deg": math.degrees(yaw), "source": "tf"}
+            # lookup 用的是"最新可用"，导航停了之后缓存里那条旧变换还会被返回，
+            # 页面上就是一个不动的幽灵机器人。按时间戳判一下新鲜度。
+            stamp = tf.header.stamp.sec + tf.header.stamp.nanosec * 1e-9
+            if stamp <= 0.0 or (self.get_clock().now().nanoseconds * 1e-9 - stamp) < 5.0:
+                t = tf.transform.translation
+                q = tf.transform.rotation
+                yaw = _yaw_from_quaternion(q.z, q.w)
+                return {"x": t.x, "y": t.y, "yaw": yaw,
+                        "yaw_deg": math.degrees(yaw), "source": "tf"}
         except TransformException:
             pass
         # 建图阶段没有 odom_to_tf，TF 树只有 map->world->imu，查不到 base_link。
@@ -1985,9 +1989,11 @@ def parse_args(argv=None):
                              "拦掉 LIO 未收敛时甩出的野点，否则高度配色会被撑爆")
     parser.add_argument("--live-cloud-z-max", type=float, default=6.0,
                         help="建图 3D 点云的离群上界（米，相对建图原点）")
-    parser.add_argument("--lio-odom-topic", default="/lio/robo/odom",
-                        help="super-lio 的机器人里程计。建图阶段没有 map->base_link，"
-                             "位姿只能从这里拿")
+    parser.add_argument("--lio-odom-topic", default="/lio/odom",
+                        help="super-lio 的里程计，建图阶段位姿只能从这里拿。"
+                             "注意别用 /lio/robo/odom —— 基础镜像的 DDS 域桥会把宇树 "
+                             "MCU 的 /dog_odom 改名发到那个话题上，两个发布者原点不同，"
+                             "订阅端会拿到交替混合的位姿，而且停止建图后图标也不消失")
     parser.add_argument("--plan-topic", default="/plan",
                         help="nav_msgs/Path 话题，用于在网页地图上画规划路径")
     # 摇杆速度上限

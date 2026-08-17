@@ -65,10 +65,14 @@
       this.renderer.setSize(w, h);
       this.container.appendChild(this.renderer.domElement);
 
-      // 地面网格：1 米一格，给点云一个尺度参照
+      // 地面网格：1 米一格，给点云一个尺度参照。
+      // 注意 z 不能留在 0 —— LIO 的世界原点在雷达上（装在头部，离地一米多），
+      // 网格放 z=0 会飘在半空。拿到 X-Cloud-Ground 后由 setGround() 落到真地面。
       const grid = new THREE.GridHelper(60, 60, 0x2a4d5c, 0x1b2f3a);
       grid.rotation.x = Math.PI / 2;   // GridHelper 默认在 XZ 面，转到 XY（ROS 是 Z 朝上）
       this.scene.add(grid);
+      this.grid = grid;
+      this.groundZ = 0;
 
       // 世界原点的三轴，红=X 绿=Y 蓝=Z
       const axes = new THREE.AxesHelper(1.2);
@@ -229,6 +233,7 @@
             // 直接报 z 会让人以为机器人陷在地里，所以统一换算成离地高度。
             const groundHdr = res.headers.get("X-Cloud-Ground");
             const ground = groundHdr === null ? null : parseFloat(groundHdr);
+            this.setGround(ground);
             const buf = await res.arrayBuffer();
             if (buf.byteLength) this._append(new Float32Array(buf), zmin, zmax);
             this.cursor = end;
@@ -285,14 +290,23 @@
       this.geometry.computeBoundingSphere();
     }
 
+    // 地面高度（世界系 z）。网格、机器人、轨迹都以它为基准，
+    // 否则全都会浮在雷达高度那一层上。
+    setGround(z) {
+      if (z === null || z === undefined || !isFinite(z)) return;
+      if (Math.abs(z - this.groundZ) < 0.02) return;   // 抖动不值得重画
+      this.groundZ = z;
+      if (this.grid) this.grid.position.z = z;
+    }
+
     // 机器人位姿（世界系），由页面按状态轮询喂进来
     setPose(pose) {
       if (!this.robot) return;
       if (!pose) { this.robot.visible = false; return; }
       this.robot.visible = true;
-      this.robot.position.set(pose.x, pose.y, 0.3);
+      this.robot.position.set(pose.x, pose.y, this.groundZ + 0.3);
       this.robot.rotation.set(0, 0, (pose.yaw_deg || 0) * Math.PI / 180);
-      if (this._follow) this._pivot.set(pose.x, pose.y, 0.6);
+      if (this._follow) this._pivot.set(pose.x, pose.y, this.groundZ + 0.6);
 
       const i = this.trailCount * 3;
       const last = this.trailCount ? [this.trail[i - 3], this.trail[i - 2]] : null;
@@ -300,7 +314,7 @@
         if (this.trailCount < 6000) {
           this.trail[i] = pose.x;
           this.trail[i + 1] = pose.y;
-          this.trail[i + 2] = 0.06;
+          this.trail[i + 2] = this.groundZ + 0.06;
           this.trailCount += 1;
           this.trailGeom.attributes.position.needsUpdate = true;
           this.trailGeom.setDrawRange(0, this.trailCount);
@@ -312,6 +326,7 @@
       this.cursor = 0;
       this.count = 0;
       this.trailCount = 0;
+      if (this.robot) this.robot.visible = false;   // 清空后别留个孤零零的机器人
       this.geometry.setDrawRange(0, 0);
       this.trailGeom.setDrawRange(0, 0);
     }
