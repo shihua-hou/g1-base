@@ -194,11 +194,9 @@ class LiveMapView:
         self.z_min = float(z_min)
         self.z_max = float(z_max)
         self.voxel_size = float(voxel_size)
-        # 3D 视图的离群带。比 2D 的 [z_min, z_max] 宽得多 —— 天花板、
-        # 货架、二层挑空都要留住，只拦明显是脏数据的点。
-        # LIO 刚起步时位姿还没收敛，偶尔会甩出 z=-33m 这种点，
-        # 它们会把前端高度配色的归一化区间撑爆（真实结构全挤进色带顶端
-        # 几个百分点，看上去就是一片糊的单色），所以必须在入口就拦掉。
+        # 3D 视图的离群带，比 2D 的高度带宽得多：天花板、货架、挑空都要留住，
+        # 只拦明显的脏数据。LIO 未收敛时会甩出 z=-33m 这种点，
+        # 不拦掉会把前端高度配色的归一化区间撑爆，整张图变成一片单色。
         self.voxel_z_min = float(voxel_z_min)
         self.voxel_z_max = float(voxel_z_max)
         self.dropped_outlier = 0
@@ -222,20 +220,12 @@ class LiveMapView:
         self._voxel_keys = set()
         self._voxel_xyz = array("f")
         self._z_range = [None, None]
-        self._ground_cache = None      # (体素数, 机器人格, 地面 z)，见 ground_level()
-        # 机器人当前 xy，由节点从 LIO 里程计喂进来。地面只在它周围找 ——
-        # 全图最密的平面未必是机器人脚下那块（站在高台、台阶口就会认错）。
-        self.robot_xy = None
+        # 机器人当前位姿，由节点从 LIO 里程计喂进来
         self.robot_z = None
-        self.ground_radius = 6.0
         # 雷达装机高度（米，卷尺实测）。地面 = 机器人当前 z - 这个值。
         self.lidar_height = 0.0
-        # 允许低于地面多少米。留 0.3 是给地面本身的起伏和 LIO 的 z 噪声，
-        # 再低就只可能是镜面倒影了。
+        # 允许低于地面多少米，再低就是脏数据。留 0.3 给地面起伏和 z 噪声。
         self.below_ground_tol = 0.3
-        # 地面在雷达的哪一侧（-1=-z, +1=+z, 0=还没判出来）。见 _ground_side()
-        self._ground_side_cache = None
-        self.ground_side_hits = {}
         self.lock = threading.Lock()
         self.last_cloud_time = 0.0
         self.cloud_count = 0
@@ -265,22 +255,13 @@ class LiveMapView:
                         self.last_cloud_time = time.time()
                         self.cloud_count += 1
                     return
-                # 2D 栅格只要机器人能撞到的高度层，3D 视图用整帧（见 _accumulate_voxels）。
-                # 高度带优先按地面算 —— 用绝对 z 的话等于在扫离地 1~3m 那一层，
-                # 跟「保存地图」出来的结果完全对不上。地面还没估出来时才退回绝对 z。
+                # 2D 栅格只取机器人能撞到的那层，3D 视图用整帧（见 _accumulate_voxels）。
+                # 高度一律按离地算：LIO 原点未必在地面上，用绝对 z 会整体偏一截。
                 zz = xyz_all[:, 2]
                 ground_z = self.ground_level()
-                # 地面还没估出来（开头几帧点太少）就先不往 2D 里堆。
-                # 用绝对 z 兜底的话，那批按错误高度带切出来的格子会被永久
-                # 记进 cells，后面再也擦不掉 —— 宁可晚一两帧。
-                side = self._ground_side_cache
-                if ground_z is None or not side:
-                    heights = None
-                else:
-                    # 统一换算成"离地高度"：地面在 -z 侧(side=-1)时高度就是 z-ground，
-                    # 在 +z 侧(side=+1，世界 Z 朝下)时要取反，否则障碍全成了负高度、
-                    # 一个都过不了筛。
-                    heights = -side * (zz - ground_z)
+                # 地面还不知道就先不堆：按错误高度带切出的格子会永久留在
+                # cells 里擦不掉，宁可晚一两帧。
+                heights = None if ground_z is None else (zz - ground_z)
                 xyz = xyz_all[(heights >= self.obstacle_min_h) &
                               (heights <= self.obstacle_max_h)] if heights is not None else xyz_all[:0]
                 if xyz.shape[0]:
@@ -366,17 +347,11 @@ class LiveMapView:
             return
         # 地板以下的点物理上不存在，全是抛光地面的镜面倒影（实测占 25%，
         # 位置在雷达关于地面的镜像处）。它们既污染高度配色，又白占体素预算。
-        lo, hi = self.voxel_z_min, self.voxel_z_max
+        lo = self.voxel_z_min
         ground_z = self.ground_level()
-        side = self._ground_side_cache
-        if ground_z is not None and side:
-            # "地面另一侧"没有真实物体。注意 side=+1 时地面在 +z（世界 Z 朝下），
-            # 该裁掉的是 z 更大的那半边，不能写死成裁下方。
-            if side < 0:
-                lo = max(lo, ground_z - self.below_ground_tol)
-            else:
-                hi = min(hi, ground_z + self.below_ground_tol)
-        keep = (xyz[:, 2] >= lo) & (xyz[:, 2] <= hi)
+        if ground_z is not None:
+            lo = max(lo, ground_z - self.below_ground_tol)   # 地面以下没有真实物体
+        keep = (xyz[:, 2] >= lo) & (xyz[:, 2] <= self.voxel_z_max)
         n_drop = int(len(xyz) - int(keep.sum()))
         if n_drop:
             with self.lock:
@@ -414,99 +389,20 @@ class LiveMapView:
             self._z_range[1] = hi if self._z_range[1] is None else max(self._z_range[1], hi)
 
     def ground_level(self):
-        """估计地面在世界系里的 z，用来把高度显示和 2D 高度带都换算成"离地"。
+        """地面在世界系里的 z。高度显示和 2D 的高度带都以它为基准。
 
-        LIO 的世界原点在雷达上（装在头上，离地一米多），所以点云里 z=0 是
-        雷达高度而不是地面。
-
-        判据是"z 方向上最密的那一层"，不是低分位数。低分位数扛不住地面镜面
-        反射 —— 展厅的抛光地板会把天花板和灯具镜像到地板下方一大片，实测
-        2% 分位数被拉到 -2.60m，而真实地面在 -1.28m。差这 1.3m 会让 2D 的
-        障碍带把地板本身当成障碍，自由区一格都出不来。
-        地面是场景里最大的连续平面，它的点几乎全落进同一个 z 桶里，
-        而墙面会摊在两三米的高度上，所以直方图峰值稳稳落在地面。
+        lio.extrinsic.odom_robo 的平移量决定了 LIO 世界原点落在哪
+        （super_lio.cpp:155  state.p = g_odom_robo.t_）：填成雷达装机高度时
+        原点就在地面，此处算出来是 0；填 0 则原点在雷达上，算出来是 -H。
+        两种配置都对得上，所以直接用"雷达当前 z 减去装机高度"，
+        既不依赖配置，机器人上下台阶也跟得住。
         """
-        # 首选：已知雷达离地 H，地面就在距雷达 H 处 —— 但在 z 的哪一侧是未知的。
-        #
-        # 雷达在 G1 头部【倒装】，实测姿态横滚 178.7°。倒装会让 Super-LIO 的
-        # 重力对齐把世界系 Z 定成朝下，于是"地面"落在 +z 而不是 -z。
-        # 实测吃过这个亏：主平面在 -2.55m，被当成地面算出"雷达离地 2.55m"，
-        # 而卷尺量的是 1.28m —— 那其实是天花板（层高 1.28+2.55=3.83m）。
-        # 所以两侧都找，哪边真有稠密平面就算哪边，不去假设 Z 的朝向。
-        if self.robot_z is not None and self.lidar_height > 0.0:
-            side = self._ground_side()
-            if side:
-                return float(self.robot_z) + side * float(self.lidar_height)
-
-        # 兜底：还没收到位姿时用直方图峰值。地面通常是场景里最大的连续平面，
-        # 点几乎全落进同一个 5cm 桶，而墙面摊在两三米高度上。
-        if np is None:
+        if self.robot_z is None or self.lidar_height <= 0.0:
             return None
-        with self.lock:
-            n = len(self._voxel_xyz) // 3
-            if n < 200:
-                return None
-            rxy = self.robot_xy
-            # 机器人走出 2m 就重算（换楼层/上下台阶时地面会变），否则按体素涨幅缓存
-            cell = (round(rxy[0] / 2.0), round(rxy[1] / 2.0)) if rxy else None
-            cache = self._ground_cache
-            if cache and cache[1] == cell and n - cache[0] < max(200, n * 0.05):
-                return cache[2]
-            flat = np.frombuffer(memoryview(self._voxel_xyz), dtype=np.float32)
-            pts = flat[: n * 3].reshape(-1, 3)
-            zs = pts[:, 2]
-            if rxy is not None:
-                near = (np.abs(pts[:, 0] - rxy[0]) <= self.ground_radius) & \
-                       (np.abs(pts[:, 1] - rxy[1]) <= self.ground_radius)
-                if int(near.sum()) >= 200:      # 附近点够多才用局部，否则退回全图
-                    zs = zs[near]
-            lo, hi = float(zs.min()), float(zs.max())
-            if not (hi > lo):
-                return None
-            bins = max(8, min(400, int(round((hi - lo) / 0.05))))
-            counts, edges = np.histogram(zs, bins=bins, range=(lo, hi))
-            peak = int(np.argmax(counts))
-            ground = float((edges[peak] + edges[peak + 1]) * 0.5)
-            self._ground_cache = (n, cell, ground)
-            return ground
-
-    def _ground_side(self):
-        """判定地面在雷达的哪一侧：-1 表示 -z（世界 Z 朝上），+1 表示 +z（朝下）。
-
-        做法是在距雷达正好 lidar_height 的两个位置各开一个 ±15cm 的窗，
-        数窗内体素。地面是场景里最大的连续平面，真地面那侧一定压倒性地多。
-        判定一旦成立就锁住不再翻转 —— 中途翻会让整张 2D 图的高度带跳变。
-        """
-        if self._ground_side_cache is not None:
-            return self._ground_side_cache
-        if np is None or self.robot_z is None or self.lidar_height <= 0.0:
-            return 0
-        with self.lock:
-            n = len(self._voxel_xyz) // 3
-            if n < 500:                       # 点太少还判不了，等一等
-                return 0
-            zs = np.frombuffer(memoryview(self._voxel_xyz), dtype=np.float32)[:n * 3][2::3]
-        win = 0.15
-        hits = {}
-        for side in (-1, 1):
-            plane = float(self.robot_z) + side * float(self.lidar_height)
-            hits[side] = int(np.count_nonzero(np.abs(zs - plane) <= win))
-        best = max(hits, key=lambda s: hits[s])
-        other = -best
-        # 要求优势明显（两倍以上）且绝对数量够，否则先不下结论
-        if hits[best] >= 200 and hits[best] >= 2 * max(hits[other], 1):
-            self._ground_side_cache = best
-            self.ground_side_hits = dict(hits)
-            return best
-        return 0
+        return float(self.robot_z) - float(self.lidar_height)
 
     def z_profile(self, top=6, bin_size=0.10):
-        """z 方向的分层剖面：返回点最密的几层及其占比。
-
-        用来判断"地面到底在哪一层"。地面、天花板、桌面、镜面反射在
-        z 直方图上都是峰，光看一个估计值分不出谁是谁 —— 把前几名连同
-        高度和占比一起列出来，一眼就能对上现场的实际结构。
-        """
+        """z 方向最密的几层及其占比。排查"地面/层高对不对"时用。"""
         if np is None:
             return []
         with self.lock:
@@ -555,9 +451,6 @@ class LiveMapView:
             self._voxel_keys = set()
             self._voxel_xyz = array("f")
             self._z_range = [None, None]
-            self._ground_cache = None
-            self._ground_side_cache = None
-            self.ground_side_hits = {}
             self.dropped_no_tf = 0
             self.dropped_outlier = 0
         return {"success": True, "message": "实时地图已清空"}
@@ -586,9 +479,6 @@ class LiveMapView:
             "ground_z": self.ground_level(),
             # z 方向最密的几层，用来核对地面到底认对没有
             "z_profile": self.z_profile(),
-            # 地面在雷达哪一侧，以及两侧各命中多少体素（判据见 _ground_side）
-            "ground_side": self._ground_side_cache or 0,
-            "ground_side_hits": self.ground_side_hits,
             # 建图为什么没数据 / 为什么糊，全靠这几项说清楚
             "cloud_frame": self.cloud_frame,
             "map_frame": self.map_frame,
@@ -928,7 +818,6 @@ class BridgeNode(Node):
         # 用 getattr：这个订阅建得比 live_map 早，头几帧可能还没那个属性。
         live = getattr(self, "live_map", None)
         if live is not None:
-            live.robot_xy = (float(p.x), float(p.y))
             live.robot_z = float(p.z)
 
     def current_pose(self):

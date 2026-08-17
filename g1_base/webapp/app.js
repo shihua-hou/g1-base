@@ -534,19 +534,8 @@
                  pose ? "" : "is-dim")}
         ${kvHtml("位姿来源", pose ? (pose.source === "lio" ? "super-lio 里程计" : "TF") : "—",
                  pose ? "" : "is-dim")}
-        ${(() => {
-          // 雷达离地 = 雷达 z − 地面 z。别写成 -ground_z ——
-          // 那等于假设世界原点在雷达上，而 odom_robo 的平移量决定原点在哪
-          // （super_lio.cpp:155），现在原点在地面，那样算出来恒等于 0。
-          const h = (l.ground_z != null && pose && pose.z != null)
-            ? pose.z - l.ground_z
-            : (l.ground_z != null ? -l.ground_z : null);
-          return kvHtml("雷达离地", h != null ? `${h.toFixed(2)} m` : "—",
-                        h == null ? "is-dim" : (Math.abs(h - 1.28) > 0.25 ? "is-warn" : ""));
-        })()}
         ${kvHtml("LIO 高度 z", pose && pose.z != null ? `${pose.z.toFixed(2)} m` : "—",
-                 pose && pose.z != null && Math.abs(pose.z) > 0.30 ? "is-crit" : "",
-                 pose && pose.z != null && Math.abs(pose.z) > 0.30 ? "bad" : "")}
+                 pose && pose.z != null ? "" : "is-dim")}
         ${kvHtml("雷达姿态",
                  pose && pose.pitch_deg != null
                    ? `俯仰 ${pose.pitch_deg.toFixed(1)}° · 横滚 ${pose.roll_deg.toFixed(1)}°`
@@ -555,9 +544,8 @@
         ${kvHtml("分辨率", l.resolution ? l.resolution + " m/px" : "—")}
       </div>
       <p class="note">开始建图后用下方摇杆把场地走一遍；停止建图会保存点云，再点「保存地图」生成 2D 栅格快照，之后在「地图列表」里激活。</p>
-      <p class="note">标定雷达安装角：让机器人<b>直立站在平地上</b>，开始建图后原地不动，
-      上面「雷达姿态」的读数就是安装角（世界系已按重力对齐，站直时这两个数只反映雷达装歪了多少）。
-      读数稳定后取平均填进 <code>lio.extrinsic.odom_robo</code>。</p>
+      <p class="note">「LIO 高度 z」在平地上应等于雷达装机高度；「雷达姿态」在机器人直立站定时
+      就是雷达的安装角。两者都用于核对 <code>lio.extrinsic.odom_robo</code>。</p>
     `;
   }
 
@@ -700,9 +688,7 @@
     mapCloud = window.G1MapCloud.create(host, {
       baseUrl: state.baseUrl,
       onStats: ({ shown, total, zmin, zmax, ground }) => {
-        // 一律显示离地高度：LIO 原点在雷达（装在头上，离地一米多），
-        // 直接报 z 的话地面会是 -1.1m 这种负数，看着像机器人陷在地里。
-        // ground 拿不到时退回原始 z，并在图例上标出来，免得读错。
+        // 一律显示离地高度。ground 拿不到时退回原始 z，并在图例上标明。
         const g = (ground === null || ground === undefined || !isFinite(ground)) ? null : ground;
         const base = g === null ? 0 : g;
         const lo = zmin - base;

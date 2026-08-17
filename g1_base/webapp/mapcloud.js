@@ -66,18 +66,16 @@
       this.container.appendChild(this.renderer.domElement);
 
       // 地面网格：1 米一格，给点云一个尺度参照。
-      // 注意 z 不能留在 0 —— LIO 的世界原点在雷达上（装在头部，离地一米多），
-      // 网格放 z=0 会飘在半空。拿到 X-Cloud-Ground 后由 setGround() 落到真地面。
+      // z 由 setGround() 按后端给的地面高度放置，别写死 0 ——
+      // 世界原点未必在地面上，取决于 odom_robo 的平移量。
       const grid = new THREE.GridHelper(60, 60, 0x2a4d5c, 0x1b2f3a);
       grid.rotation.x = Math.PI / 2;   // GridHelper 默认在 XZ 面，转到 XY（ROS 是 Z 朝上）
       this.scene.add(grid);
       this.grid = grid;
       this.groundZ = 0;
 
-      // 这里原本放了一个世界原点的三轴指示器。去掉了：
-      // 它标的是"建图起点"而不是机器人当前位置，又因为 LIO 原点在雷达上，
-      // 看上去就是一个浮在半空、含义不明的十字。机器人锥体已经把
-      // "现在在哪、朝哪"说清楚了，再多一个只会让人误读。
+      // 不放世界原点的三轴指示器：它标的是建图起点而非机器人当前位置，
+      // 容易被误读成"机器人在这"。机器人锥体已经把位置和朝向说清楚了。
 
       // 点云本体：一次性分配满容量，之后只改 drawRange
       const geom = new THREE.BufferGeometry();
@@ -230,8 +228,7 @@
             const zmin = parseFloat(res.headers.get("X-Cloud-Zmin") || "0");
             const zmax = parseFloat(res.headers.get("X-Cloud-Zmax") || "1");
             const voxel = parseFloat(res.headers.get("X-Cloud-Voxel") || "0.08");
-            // 地面在世界系里的 z。LIO 原点在雷达上（装在头上，离地一米多），
-            // 直接报 z 会让人以为机器人陷在地里，所以统一换算成离地高度。
+            // 地面在世界系里的 z，用来把高度显示统一换算成离地高度
             const groundHdr = res.headers.get("X-Cloud-Ground");
             const ground = groundHdr === null ? null : parseFloat(groundHdr);
             this.setGround(ground);
@@ -291,8 +288,7 @@
       this.geometry.computeBoundingSphere();
     }
 
-    // 地面高度（世界系 z）。网格、机器人、轨迹都以它为基准，
-    // 否则全都会浮在雷达高度那一层上。
+    // 地面高度（世界系 z）。网格、机器人、轨迹都以它为基准。
     setGround(z) {
       if (z === null || z === undefined || !isFinite(z)) return;
       if (Math.abs(z - this.groundZ) < 0.02) return;   // 抖动不值得重画
