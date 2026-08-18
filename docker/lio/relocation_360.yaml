@@ -1,0 +1,100 @@
+# Super-LIO 重定位在 G1 上的运行参数
+#
+# start_pc2_localization.sh 找的就是这个文件名（resolve_super_lio_config_file，
+# 脚本第 164/168 行）。上游只带了通用的 relocation.yaml，没有 MID360 版本，
+# 缺了它整条定位链路起不来 —— 表现为脚本退出码 1、Nav2 一个节点都不启动。
+#
+# 与建图用的 livox_360.yaml 的关系：传感器参数和外参【必须完全一致】，
+# 否则重定位算出来的位姿和地图对不上。改一处记得改两处。
+# 差异只在建图 vs 重定位的职责本身（见下面各处注释）。
+#
+# 校订自上游 relocation.yaml，其中三处是上游的 bug，别照抄回去：
+#   lio.sensor.filter_rate  上游写 3.0，而 ROSWrapper.cpp:55 声明的是 int，
+#                           类型不匹配节点直接起不来
+#   lio.sensor.nbg          拼写错误，正确名是 imu_nbg（ROSWrapper.cpp:79），
+#                           写错了不报错，静默用默认值 0.0
+#   lio.hash_map.insert_resolution
+#                           ROSWrapper.cpp 里根本没声明，完全被忽略，已删
+/**:
+  ros__parameters:
+    # ⚠ 必须 false：重定位是拿已有地图做匹配，不该回写地图。
+    # 开了的话 relocation_node 退出时 saveMap() 会把当前帧覆盖上去，
+    # 辛苦建的图就被跑一趟毁了。
+    lio.map.save_map: false
+    lio.map.if_filter: true
+    # 这两项启动时会被脚本用 -p 覆盖成实际的地图目录和文件名
+    # （start_pc2_localization.sh 第 213-214 行），这里只是占位。
+    lio.map.save_map_dir: "map"
+    lio.map.map_name: "map.pcd"
+    # 只在存图路径上用到（super_lio.cpp:291/339），save_map=false 时不生效，
+    # 保留上游值即可。
+    lio.map.ds_size: 0.3
+    lio.map.save_interval: 500
+
+    lio.ros.lidar_topic: "/livox/lidar"
+    lio.ros.imu_topic: "/livox/imu"
+
+    # ── 以下传感器参数与 livox_360.yaml 逐项对齐 ──
+    lio.sensor.lidar_type: 1
+    # 1.0m：盖掉头部倒装雷达的支架（在 0.5m 以内），又不至于把脚下地板削掉。
+    # 上游重定位配置给的是 0.3，那样支架会进点云，干扰匹配。
+    lio.sensor.blind: 1.0
+    # 与建图时一致。上游 100.0 会把远处噪点也拉进匹配。
+    lio.sensor.maxrange: 20.0
+    lio.sensor.filter_rate: 3
+    lio.sensor.enable_downsample: true
+    lio.sensor.voxel_fliter_size: 0.5
+    lio.sensor.gravity_norm: 9.7946
+    lio.sensor.imu_type: 1
+    lio.sensor.imu_na: 0.1
+    lio.sensor.imu_ng: 0.1
+    lio.sensor.imu_nba: 0.0001
+    lio.sensor.imu_nbg: 0.0001
+
+    # ── 外参：与 livox_360.yaml 必须字字相同 ──
+    # 雷达 -> IMU，MID360 内部固定值
+    lio.extrinsic.lidar_imu: [-0.011, -0.02329, 0.04412,
+                              1.0, 0.0, 0.0,
+                              0.0, 1.0, 0.0,
+                              0.0, 0.0, 1.0]
+    # [x, y, z, roll°, pitch°, yaw°]，雷达在机器人系里的位姿。
+    # z=+1.28 把世界原点放在地面上（super_lio.cpp:155 用平移量定义原点）。
+    # 建图时用的就是这个值，重定位必须一致，否则位姿会整体差一个雷达高度。
+    # 上游给的 [0,0,0.13,0,0,0] 是它自己数据集的机器人，跟 G1 无关。
+    lio.extrinsic.odom_robo: [0.0, 0.0, 1.28, 180.0, -2.4, 0.0]
+
+    # 2000000 而非上游的 100000000：那是给车载大场景准备的，
+    # Jetson 上白占内存。当前地图约 6.6 万点，两百万槽位有 30 倍余量。
+    lio.hash_map.hash_capacity: 2000000
+    lio.hash_map.vox_resolution: 0.5
+
+    lio.kf.kf_type: 0
+    lio.kf.kf_max_iterations: 4
+    lio.kf.kf_align_gravity: true
+    lio.kf.kf_quit_eps: 0.001
+
+    # 重定位专用：从全局地图里切子图做匹配
+    lio.submap.submap_resolution: 0.5
+    lio.submap.submap_capacity: 1000000
+
+    lio.output.robot: false
+    lio.output.plan_env_world: false
+    lio.output.plan_env_body: false
+    lio.output.ml_map: false
+    lio.output.planner: false
+    # ⚠ 必须 true：它控制 /lio/cloud_world 发不发
+    # （super_lio_reloc.cpp:310 由 g_visual_map 把门）。
+    # navigation_manager 把 cloud_world 当定位就绪的判据之一
+    # （navigation_manager.py:922），关掉就永远等不到就绪。
+    lio.output.map: true
+    lio.output.dense: true
+    lio.output.pub_step: 1
+
+    # 是否把新观测并进地图。true = 边走边补充，场景有变化时更稳。
+    lio.relocation.update_map: true
+    # 初始位姿猜测 [x, y, z, roll°, pitch°, yaw°]。
+    # 全零 = 假设开机时机器人站在建图起点附近。偏得远会重定位失败，
+    # 那时用网页「重定位」页手动给点。
+    lio.relocation.init_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    lio.eva.timer: true

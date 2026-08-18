@@ -53,6 +53,10 @@ RUN set -exo pipefail; \
 COPY docker/lio/MID360_config.json /root/lio_ws/install/livox_ros_driver2/share/livox_ros_driver2/config/MID360_config.json
 # Super-LIO 运行参数：上游默认 save_map:false，建完图不落盘，必须覆盖
 COPY docker/lio/livox_360.yaml /root/lio_ws/install/super_lio/share/super_lio/config/livox_360.yaml
+# 重定位参数：上游只有通用的 relocation.yaml，没有 MID360 版本，
+# 而 start_pc2_localization.sh 找的正是 relocation_360.yaml —— 缺了它定位起不来
+COPY docker/lio/relocation_360.yaml /root/lio_ws/install/super_lio/share/super_lio/config/relocation_360.yaml
+RUN test -f /root/lio_ws/install/super_lio/share/super_lio/config/relocation_360.yaml
 
 # 源码放在最后几层：改代码只重建这薄薄一层，8GB 的基础层机器人本地复用
 COPY g1_base                /root/g1_ws/src/g1_base
