@@ -506,7 +506,7 @@
         ${kvHtml("朝向", pose ? `${pose.yaw_deg.toFixed(0)}°` : "—", pose ? "" : "is-dim")}
         ${kvHtml("地图", (s.current_map && s.current_map.base_name) || "—",
                  s.current_map ? "" : "is-dim")}
-        ${kvHtml("电量", battery != null ? `${battery} %` : "未接入",
+        ${kvHtml("电量", battery != null ? `${battery} %` : (sys.battery_topic ? "读数过期" : "未接入"),
                  battery == null ? "is-dim" : battery <= 20 ? "is-crit" : "is-ok")}
         ${kvHtml("已运行", fmtDuration(sys.uptime_sec))}
       </div>
@@ -520,8 +520,9 @@
 
   // ── 地图 ──
   // 列表与详情并到同一屏：左边选，右边立刻预览，不再跳二级页、不再上下滚。
-  function renderMap(sub) {
+  function renderMap(sub, rest) {
     startPolling();
+    if (sub === "edit") return renderMapEdit(rest || []);
     const active = sub === "mapping" ? "mapping" : "list";
     const opts = {
       back: "home", title: "地图", sub: "建图 · 编辑",
@@ -894,8 +895,10 @@
 
     actEl.innerHTML = `
       ${entry && !entry.is_active ? `<button class="btn success" id="map-activate">设为当前</button>` : ""}
+      ${entry && entry.source !== "hall" && info.geometry
+          ? `<button class="btn" data-nav="map/edit/${encodeURIComponent(entry.id)}">编辑地图</button>` : ""}
       ${entry && entry.source !== "active" ? `<button class="btn danger" id="map-delete">删除</button>` : ""}
-      <span class="note" style="margin:0 0 0 auto">坐标编辑请在「导航 › 多点巡航」中进行</span>
+      <span class="note" style="margin:0 0 0 auto">巡航点坐标请在「导航 › 多点巡航」中编辑</span>
     `;
     const actBtn = document.getElementById("map-activate");
     if (actBtn) actBtn.addEventListener("click", async () => {
@@ -953,6 +956,11 @@
     // 实时激光：用边缘色青绿，跟静态地图的黑白灰拉开，一眼分得清
     // "地图里记着的障碍物" 和 "此刻真的挡在前面的东西"
     scan: cssVar("--edge", "#1fa89f"),
+    // 禁行区：半透明红块 + 实线边。和地图本身的纯黑障碍拉开，
+    // 不然改完看不出哪块是自己划的、哪块是雷达扫到的。
+    zoneFill: "rgba(184, 69, 63, .28)",
+    zoneLine: cssVar("--crit", "#b8453f"),
+    brush: cssVar("--signal", "#2b87cc"),
   };
   const HOLD_MS = 320;   // 长按多久算"放置"，短于这个就是普通拖动地图
 
@@ -961,6 +969,8 @@
     onPick = null,          // 兼容旧用法：单击取点
     onPlace = null,         // 长按放置：{x, y, yaw_deg|null}
     onWaypointMove = null,  // 直接在图上拖动巡航点
+    onEditStroke = null,    // 编辑：画完一笔，给世界坐标点列
+    onEditRect = null,      // 编辑：拉完一个框，给 {x,y,w,h}
   } = {}) {
     return new Promise((resolve) => {
       // 地图要双指缩放旋转，得让全局的防缩放拦截放行这一块
@@ -984,6 +994,11 @@
       let objectUrl = null;
       let path = [];             // 世界坐标点列，Nav2 规划出来的路径
       let scan = [];             // 世界坐标点列，/scan 投出来的实时障碍点
+      let zones = [];            // 禁行区矩形（世界坐标），编辑页用
+      let editMode = null;       // null=不编辑 | "paint" | "zone" | "crop"
+      let editStroke = [];       // 正在画的这一笔（世界坐标）
+      let editRect = null;       // 正在拖的矩形 {x0,y0,x1,y1} 世界坐标
+      let editBrushRadius = 0.1; // 画笔半径（米），编辑页调
       let placing = null;        // 长按放置中：{ px, py, world, yaw_deg, cur }
       let holdTimer = null;
       let dragWp = -1;           // 正在拖动的巡航点下标
@@ -1140,6 +1155,55 @@
         ctx.globalAlpha = 1;
       }
 
+      // 禁行区与编辑中的图形。禁行区用半透明红块 + 实线边，
+      // 和地图本身的纯黑障碍拉开——不然改完看不出哪块是自己划的。
+      function drawZones() {
+        const boxes = zones.map((z) => [z.x, z.y, z.w, z.h]);
+        if (editRect) {
+          boxes.push([
+            Math.min(editRect.x0, editRect.x1), Math.min(editRect.y0, editRect.y1),
+            Math.abs(editRect.x1 - editRect.x0), Math.abs(editRect.y1 - editRect.y0),
+          ]);
+        }
+        if (!boxes.length) return;
+        ctx.save();
+        boxes.forEach(([x, y, w, h]) => {
+          const a = worldPoint(x, y);           // 左下
+          const b = worldPoint(x + w, y + h);   // 右上
+          const rx = Math.min(a.x, b.x), ry = Math.min(a.y, b.y);
+          const rw = Math.abs(b.x - a.x), rh = Math.abs(b.y - a.y);
+          ctx.fillStyle = MAP_COLORS.zoneFill;
+          ctx.fillRect(rx, ry, rw, rh);
+          ctx.strokeStyle = MAP_COLORS.zoneLine;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(rx, ry, rw, rh);
+        });
+        ctx.restore();
+      }
+
+      // 正在画的这一笔实时描出来，松手前就知道会涂到哪
+      function drawStroke() {
+        if (editStroke.length < 1) return;
+        ctx.save();
+        ctx.strokeStyle = MAP_COLORS.brush;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = Math.max(2, (editBrushRadius * 2 / geo.resolution)
+                                    / geo.render_scale * view.scale);
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath();
+        editStroke.forEach((pt, i) => {
+          const p = worldPoint(pt[0], pt[1]);
+          if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        });
+        if (editStroke.length === 1) {
+          const p = worldPoint(editStroke[0][0], editStroke[0][1]);
+          ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
       function draw() {
         const w = wrapEl.clientWidth, h = wrapEl.clientHeight;
         if (!w || !h) return;
@@ -1156,6 +1220,8 @@
 
         drawPath();
         drawScan();
+        drawZones();
+        drawStroke();
 
         // 巡航点之间连虚线，看得出巡航顺序
         if (waypoints.length > 1) {
@@ -1244,6 +1310,20 @@
           draw();
           return;
         }
+        // 编辑模式：单指按下就开始画/拉框。双指依然是缩放平移（上面已 return），
+        // 所以编辑时也能自由缩放，不用来回切模式。
+        if (editMode) {
+          const { px, py } = toImage(pt.x, pt.y);
+          if (!inImage(px, py)) return;
+          const world = worldFromPixel(geo, px, py);
+          if (editMode === "paint") {
+            editStroke = [[world.x, world.y]];
+          } else {
+            editRect = { x0: world.x, y0: world.y, x1: world.x, y1: world.y };
+          }
+          draw();
+          return;
+        }
         // 先看是不是按在某个巡航点上——那就是要拖它，而不是拖地图
         if (onWaypointMove) {
           const hit = hitWaypoint(pt);
@@ -1275,6 +1355,26 @@
           view.rot = pinch.rot + (angle(a, b) - pinch.angle);
           moved = 99;
           draw();
+          return;
+        }
+
+        if (editMode && (editStroke.length || editRect)) {
+          const { px, py } = toImage(cur.x, cur.y);
+          if (inImage(px, py)) {
+            const world = worldFromPixel(geo, px, py);
+            if (editMode === "paint") {
+              const last = editStroke[editStroke.length - 1];
+              // 采样点太密没意义，按 1/3 笔刷半径抽稀，省得一笔几千个点发上去
+              if (!last || Math.hypot(world.x - last[0], world.y - last[1])
+                           > editBrushRadius / 3) {
+                editStroke.push([world.x, world.y]);
+              }
+            } else if (editRect) {
+              editRect.x1 = world.x; editRect.y1 = world.y;
+            }
+            draw();
+          }
+          moved = 99;
           return;
         }
 
@@ -1312,6 +1412,22 @@
         pointers.delete(ev.pointerId);
         if (pointers.size < 2) pinch = null;
         cancelHold();
+        // 编辑模式：松手就把这一笔 / 这个框交给上层去提交
+        if (editMode && (editStroke.length || editRect)) {
+          const stroke = editStroke;
+          const rect = editRect;
+          editStroke = []; editRect = null;
+          draw();
+          if (editMode === "paint" && stroke.length && onEditStroke) {
+            onEditStroke(stroke);
+          } else if (rect && onEditRect) {
+            const x = Math.min(rect.x0, rect.x1), y = Math.min(rect.y0, rect.y1);
+            const w = Math.abs(rect.x1 - rect.x0), h = Math.abs(rect.y1 - rect.y0);
+            // 太小的框多半是误触，忽略掉——不然会画出一堆看不见的禁行区
+            if (w > 0.05 && h > 0.05) onEditRect({ x, y, w, h });
+          }
+          return;
+        }
         if (dragWp >= 0) { dragWp = -1; return; }
         if (placing) {
           const world = placing.world;
@@ -1361,6 +1477,13 @@
         setMarks(list) { marks = list || []; draw(); },
         setPath(points) { path = points || []; draw(); },
         setScan(points) { scan = points || []; draw(); },
+        setZones(list) { zones = list || []; draw(); },
+        setEditMode(mode, opts) {
+          editMode = mode || null;
+          if (opts && opts.radius != null) editBrushRadius = opts.radius;
+          editStroke = []; editRect = null;
+          draw();
+        },
         setImage(url, newGeo) {
           if (newGeo) geo = newGeo;
           img.src = url;
@@ -2212,6 +2335,241 @@
       } catch (_e) { renderWpList(); }
     }
   }
+
+  // ── 地图编辑 ──
+  //
+  // 为什么要有这个页面：pcd_to_2d_map 是从点云一次投出来的，玻璃门和镂空
+  // 栏杆雷达打不到，地图上是通的，机器人会径直撞过去；反过来，走动的人和
+  // 临时堆的箱子会被扫成永久障碍把通道堵死。这些只能人工修。
+  const mapEdit = {
+    view: null, state: null, mapId: null,
+    tool: "paint", brush: "occupied", radius: 0.15,
+  };
+
+  const EDIT_TOOLS = [
+    ["paint", "画笔", "涂改栅格"],
+    ["zone", "禁行区", "框出机器人不许进的区域"],
+  ];
+  const EDIT_BRUSHES = [
+    ["occupied", "障碍", "补上雷达打不到的玻璃门、栏杆"],
+    ["free", "可通行", "擦掉被扫成障碍的人和箱子"],
+    ["unknown", "未知", "抹成未知，交给实时避障判断"],
+  ];
+
+  async function renderMapEdit(sub) {
+    startPolling();
+    const mapId = sub && sub[0] ? decodeURIComponent(sub[0]) : "active";
+    mapEdit.mapId = mapId;
+
+    shell({ back: "map/list", title: "地图编辑", sub: "涂改 · 禁行区 · 裁剪" },
+      "cols-main-side", `
+      <section class="pane">
+        <div class="pane-head">
+          <div class="eyebrow">地图</div>
+          <span class="map-name" id="edit-name"></span>
+          <span class="hint">单指涂改 / 拉框 · 双指缩放平移</span>
+        </div>
+        <div class="pane-body flush map-host">
+          <div class="map-wrap" id="edit-map"><div class="center-text">加载地图…</div></div>
+        </div>
+      </section>
+      <div class="stack">
+        <section class="pane fixed">
+          <div class="pane-head"><div class="eyebrow">工具</div></div>
+          <div class="pane-body">
+            <div class="sb-tabs" id="edit-tools">
+              ${EDIT_TOOLS.map(([k, name], i) => `
+                <button class="${i === 0 ? "active" : ""}" data-tool="${k}">${name}</button>`).join("")}
+            </div>
+            <div id="edit-brush-box">
+              <p class="note" style="margin:10px 0 4px">涂成什么</p>
+              <div class="sb-tabs" id="edit-brushes">
+                ${EDIT_BRUSHES.map(([k, name], i) => `
+                  <button class="${i === 0 ? "active" : ""}" data-brush="${k}">${name}</button>`).join("")}
+              </div>
+              <div class="field" style="margin-top:10px">
+                <label>画笔半径 <span id="edit-radius-view">0.15</span> m</label>
+                <input id="edit-radius" type="range" min="0.05" max="1" step="0.05" value="0.15" />
+              </div>
+            </div>
+            <p class="note" id="edit-tip"></p>
+          </div>
+        </section>
+        <section class="pane fixed">
+          <div class="pane-head">
+            <div class="eyebrow">禁行区 (<span id="edit-zone-count">0</span>)</div>
+            <button class="btn sm ghost" id="edit-zone-clear">清空</button>
+          </div>
+          <div class="pane-body scroll" id="edit-zone-list"></div>
+        </section>
+        <section class="pane fixed">
+          <div class="pane-head"><div class="eyebrow">整图操作</div></div>
+          <div class="pane-body">
+            <div class="btn-row">
+              <button class="btn" id="edit-autocrop">自动裁边</button>
+              <button class="btn" id="edit-rot90">旋转 90°</button>
+            </div>
+            <p class="note">自动裁边去掉四周成片的未知区域，只留有内容的部分。
+              旋转会让重定位用的 3D 点云对不上，只适合还没投入使用的地图。</p>
+            <div class="btn-row" style="margin-top:8px">
+              <button class="btn danger" id="edit-revert">还原为最初的地图</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    `);
+
+    const nameEl = document.getElementById("edit-name");
+    const tipEl = document.getElementById("edit-tip");
+
+    async function refreshState() {
+      mapEdit.state = await api(`/api/maps/${encodeURIComponent(mapId)}/edit`);
+      nameEl.innerHTML = `<span class="map-name-tag">${escapeHtml(
+        mapEdit.state.label || mapEdit.state.id)}</span>`;
+      renderZones();
+      document.getElementById("edit-revert").disabled = !mapEdit.state.can_revert;
+    }
+
+    function renderZones() {
+      const zones = (mapEdit.state && mapEdit.state.zones) || [];
+      document.getElementById("edit-zone-count").textContent = zones.length;
+      document.getElementById("edit-zone-list").innerHTML = zones.length
+        ? zones.map((z, i) => `
+            <div class="wp-row">
+              <div class="wp-main">
+                <div class="title">${z.w.toFixed(2)} × ${z.h.toFixed(2)} m</div>
+                <div class="meta">左下 ${z.x.toFixed(2)}, ${z.y.toFixed(2)}</div>
+              </div>
+              <button class="btn sm danger" data-zone-del="${i}">删</button>
+            </div>`).join("")
+        : `<p class="note">还没有禁行区。选「禁行区」工具后在图上拉框。</p>`;
+      if (mapEdit.view) mapEdit.view.setZones(zones);
+    }
+
+    async function saveZones(zones) {
+      const res = await guarded(
+        () => api(`/api/maps/${encodeURIComponent(mapId)}/edit/zones`,
+                  { method: "POST", body: { zones } }), "禁行区已保存");
+      mapEdit.state.zones = res.zones || zones;
+      renderZones();
+      reloadImage();
+    }
+
+    // 改完地图要换掉底图：服务端已经重写了 pgm，但 URL 没变，
+    // 浏览器会拿缓存。用时间戳强制刷新。
+    function reloadImage() {
+      if (!mapEdit.view) return;
+      mapEdit.view.setImage(
+        `${state.baseUrl}/api/maps/${encodeURIComponent(mapId)}/image?t=${Date.now()}`);
+    }
+
+    function syncTool() {
+      const painting = mapEdit.tool === "paint";
+      document.getElementById("edit-brush-box").hidden = !painting;
+      tipEl.textContent = painting
+        ? "在图上按住拖动即可涂改；双指缩放平移不受影响。"
+        : "在图上拉一个框＝一个禁行区。禁行区单独存，随时可以删掉恢复。";
+      if (mapEdit.view) {
+        mapEdit.view.setEditMode(painting ? "paint" : "zone", { radius: mapEdit.radius });
+      }
+    }
+
+    document.getElementById("edit-tools").addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-tool]");
+      if (!btn) return;
+      mapEdit.tool = btn.getAttribute("data-tool");
+      [...ev.currentTarget.children].forEach((c) => c.classList.toggle("active", c === btn));
+      syncTool();
+    });
+    document.getElementById("edit-brushes").addEventListener("click", (ev) => {
+      const btn = ev.target.closest("[data-brush]");
+      if (!btn) return;
+      mapEdit.brush = btn.getAttribute("data-brush");
+      [...ev.currentTarget.children].forEach((c) => c.classList.toggle("active", c === btn));
+    });
+    const radiusEl = document.getElementById("edit-radius");
+    radiusEl.addEventListener("input", () => {
+      mapEdit.radius = Number(radiusEl.value);
+      document.getElementById("edit-radius-view").textContent = mapEdit.radius.toFixed(2);
+      if (mapEdit.view) mapEdit.view.setEditMode(mapEdit.tool === "paint" ? "paint" : "zone",
+                                                 { radius: mapEdit.radius });
+    });
+
+    document.getElementById("edit-zone-list").addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("[data-zone-del]");
+      if (!btn) return;
+      const idx = Number(btn.getAttribute("data-zone-del"));
+      const zones = (mapEdit.state.zones || []).filter((_z, i) => i !== idx);
+      await saveZones(zones).catch(() => {});
+    });
+    document.getElementById("edit-zone-clear").addEventListener("click", async () => {
+      if (!(mapEdit.state.zones || []).length) return;
+      if (!confirm("清空所有禁行区？")) return;
+      await saveZones([]).catch(() => {});
+    });
+
+    bindBusy("edit-autocrop", "裁剪中…", async () => {
+      const res = await api(`/api/maps/${encodeURIComponent(mapId)}/edit/transform`,
+                            { method: "POST", body: { action: "autocrop" } });
+      await remount();
+      return res;
+    }, "已自动裁边");
+
+    document.getElementById("edit-rot90").addEventListener("click", async () => {
+      if (!confirm("旋转会让重定位用的 3D 点云对不上，之后需要重新建图。\n\n确认旋转？")) return;
+      await withBusy(document.getElementById("edit-rot90"), "旋转中…", async () => {
+        const res = await guarded(
+          () => api(`/api/maps/${encodeURIComponent(mapId)}/edit/transform`,
+                    { method: "POST", body: { action: "rotate90" } }), "已旋转");
+        if (res && res.message) toast(res.message, "warn");
+        await remount();
+      }).catch(() => {});
+    });
+
+    document.getElementById("edit-revert").addEventListener("click", async () => {
+      if (!confirm("还原为最初的地图？\n\n所有涂改和禁行区都会丢失。")) return;
+      await withBusy(document.getElementById("edit-revert"), "还原中…", async () => {
+        await guarded(() => api(`/api/maps/${encodeURIComponent(mapId)}/edit/revert`,
+                                { method: "POST" }), "已还原");
+        await remount();
+      }).catch(() => {});
+    });
+
+    async function remount() {
+      await refreshState();
+      reloadImage();
+    }
+
+    // 挂地图
+    let info = null;
+    try { info = await api(`/api/maps/${encodeURIComponent(mapId)}`); } catch (_e) { /* 下面兜底 */ }
+    const host = document.getElementById("edit-map");
+    if (!info || !info.geometry) {
+      host.innerHTML = `<div class="center-text">这张地图没有栅格数据，无法编辑</div>`;
+      return;
+    }
+    mapEdit.view = await mountMapView(host, {
+      imageUrl: mapImageUrl(mapId, info.mtime),
+      geo: info.geometry,
+      onEditStroke: async (stroke) => {
+        await guarded(() => api(`/api/maps/${encodeURIComponent(mapId)}/edit/paint`, {
+          method: "POST",
+          body: { strokes: [stroke], brush: mapEdit.brush, radius_m: mapEdit.radius },
+        }), null).then(reloadImage).catch(() => {});
+      },
+      onEditRect: async (rect) => {
+        const zones = [...((mapEdit.state && mapEdit.state.zones) || []), rect];
+        await saveZones(zones).catch(() => {});
+      },
+    });
+    await refreshState();
+    syncTool();
+    onPageLeave(() => {
+      if (mapEdit.view && mapEdit.view.destroy) mapEdit.view.destroy();
+      mapEdit.view = null;
+    });
+  }
+
   // ── 控制 ──
   function renderControl(sub) {
     startPolling();
@@ -2831,7 +3189,7 @@
     switch (section) {
       case "connect": renderConnect(); break;
       case "home": renderHome(); break;
-      case "map": renderMap(rest[0]); break;
+      case "map": renderMap(rest[0], rest.slice(1)); break;
       case "nav": renderNav(rest); break;
       case "control": renderControl(rest); break;
       case "teach": renderTeach(); break;

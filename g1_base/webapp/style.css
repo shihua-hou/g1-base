@@ -1054,3 +1054,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 @media (max-width: 720px) {
   .voice-row { grid-template-columns: 1fr; gap: 4px; }
 }
+
+/* 地图编辑：工具栏下的说明文字压得紧一点，给画布让位 */
+#edit-brush-box .field { margin-top: 8px; }
+#edit-zone-list .wp-row { margin-bottom: 6px; }

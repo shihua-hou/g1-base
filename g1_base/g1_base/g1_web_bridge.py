@@ -51,9 +51,10 @@ from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 try:
-    from sensor_msgs.msg import CompressedImage, LaserScan, PointCloud2
+    from sensor_msgs.msg import BatteryState, CompressedImage, LaserScan, PointCloud2
     from sensor_msgs_py import point_cloud2 as pc2
 except ImportError:  # pragma: no cover - 缺这些只影响实时地图与相机
+    BatteryState = None
     CompressedImage = None
     LaserScan = None
     PointCloud2 = None
@@ -704,6 +705,25 @@ class BridgeNode(Node):
         self.cli_speak = self.create_client(Speak, "/g1_control/speak", callback_group=self._group)
         self.cli_set_volume = self.create_client(SetVolume, "/g1_control/set_volume", callback_group=self._group)
 
+        # ── 电量 ──
+        # G1 的 unitree_hg LowState_ 里没有电池字段（字段表实机确认过：
+        # version/mode_pr/mode_machine/tick/imu_state/motor_state/
+        # wireless_remote/reserve/crc），所以电量只能来自别的发布者。
+        # 这里不猜通道名，只认标准的 sensor_msgs/BatteryState：
+        # 指定了 --battery-topic 就订阅它，否则周期扫描话题图自动发现。
+        # 一个都没有就保持 None，界面显示"未接入"——不编数字。
+        self._battery_lock = threading.Lock()
+        self._battery_percent = None
+        self._battery_stamp = 0.0
+        self._battery_topic = None
+        self._battery_sub = None
+        if BatteryState is not None:
+            if args.battery_topic.strip():
+                self._subscribe_battery(args.battery_topic.strip())
+            else:
+                # 启动时话题往往还没出现，所以周期性重试而不是只找一次
+                self.create_timer(5.0, self._discover_battery, callback_group=self._group)
+
         # ── 事件播报 ──
         # 1Hz 比对状态快照。播报本身走 _announce，失败只记日志，
         # 绝不让音频问题拖垮状态轮询。
@@ -995,15 +1015,66 @@ class BridgeNode(Node):
             out["elapsed_sec"] = None
         return out
 
+    def _subscribe_battery(self, topic):
+        if self._battery_sub is not None or BatteryState is None:
+            return
+        try:
+            self._battery_sub = self.create_subscription(
+                BatteryState, topic, self._on_battery,
+                QoSPresetProfiles.SENSOR_DATA.value, callback_group=self._group,
+            )
+        except Exception as exc:
+            self.get_logger().warning(f"[battery] 订阅 {topic} 失败: {exc}")
+            return
+        self._battery_topic = topic
+        self.get_logger().info(f"[battery] 已订阅 {topic}")
+
+    def _discover_battery(self):
+        if self._battery_sub is not None:
+            return
+        try:
+            for name, types in self.get_topic_names_and_types():
+                if "sensor_msgs/msg/BatteryState" in types:
+                    self._subscribe_battery(name)
+                    return
+        except Exception as exc:
+            self.get_logger().debug(f"[battery] 话题扫描失败: {exc}")
+
+    def _on_battery(self, msg):
+        # REP-147 规定 percentage 是 0~1 的比例，但现实里不少驱动直接发 0~100。
+        # 两种都收：<=1 当比例，否则当百分数。分不清的边界值（正好 1.0）按
+        # 比例算成 100%，这个歧义无解，取更常见的那个。
+        value = None
+        pct = getattr(msg, "percentage", None)
+        if pct is not None and math.isfinite(pct) and pct >= 0.0:
+            value = pct * 100.0 if pct <= 1.0 else pct
+        with self._battery_lock:
+            if value is None:
+                self._battery_percent = None
+            else:
+                self._battery_percent = int(round(max(0.0, min(100.0, value))))
+            self._battery_stamp = time.time()
+
+    def battery_snapshot(self):
+        with self._battery_lock:
+            pct, stamp, topic = self._battery_percent, self._battery_stamp, self._battery_topic
+        # 超过 30 秒没更新就当断了，别拿一个陈旧的电量误导人
+        if stamp and time.time() - stamp > 30.0:
+            pct = None
+        return pct, topic
+
     def system_info(self):
         """主机侧运行指标。取不到的字段返回 None，前端显示 '—'，不编造数值。"""
+        battery_percent, battery_topic = self.battery_snapshot()
         return {
             "cpu_percent": _cpu_percent(),
             "mem_percent": _mem_percent(),
             "ip": _primary_ip(self.args.net_if),
             "hostname": _hostname(),
             "uptime_sec": round(time.time() - self._start_time, 1),
-            "battery_percent": None,  # 需 SDK lowstate 订阅，当前未接入
+            "battery_percent": battery_percent,
+            # 让界面能区分"没有发布者"和"有发布者但读数过期"
+            "battery_topic": battery_topic,
         }
 
     # ── 通用同步调用助手 ──
@@ -1784,6 +1855,189 @@ def map_yaml_info(map_id):
     return {**entry, "yaml": data, "geometry": geometry}
 
 
+# ── 地图编辑 ──
+#
+# 三层文件模型见 map_edit 模块头部。这里只负责：解析 map_id -> 路径、
+# 参数校验、每次改动后从底图重建，并把结果同步给"当前使用中"的那张。
+
+def _map_edit_paths(map_id):
+    entry = resolve_map_entry(map_id)
+    if entry["source"] == "hall":
+        raise ApiError("场馆预设地图是只读的，不能直接编辑", 400)
+    yaml_path = Path(entry["yaml_path"])
+    pgm_path = yaml_path.with_suffix(".pgm")
+    if not pgm_path.is_file():
+        raise ApiError("地图缺少 pgm 文件，无法编辑", 400)
+    return entry, yaml_path, pgm_path
+
+
+def _map_geo(yaml_path):
+    from g1_base import map_edit
+
+    try:
+        return map_edit.read_map_yaml(yaml_path)
+    except map_edit.MapEditError as exc:
+        raise ApiError(str(exc), 400)
+
+
+def map_edit_state(map_id):
+    from g1_base import map_edit
+
+    entry, yaml_path, pgm_path = _map_edit_paths(map_id)
+    geo = _map_geo(yaml_path)
+    shape = map_edit.read_pgm(pgm_path).shape
+    return {
+        "id": entry["id"],
+        "label": entry.get("label", ""),
+        "width": int(shape[1]),
+        "height": int(shape[0]),
+        "resolution": geo["resolution"],
+        "origin": [geo["origin_x"], geo["origin_y"]],
+        "zones": map_edit.load_edits(pgm_path)["zones"],
+        "can_revert": map_edit.has_backup(pgm_path),
+    }
+
+
+def map_edit_paint(map_id, strokes, brush, radius_m):
+    """涂改落在底图上，再叠回禁行区重建。
+
+    直接改 .pgm 的话，下次禁行区一变动就会从底图重建，涂改全丢。
+    """
+    from g1_base import map_edit
+
+    if not isinstance(strokes, list) or not strokes:
+        raise ApiError("没有可涂改的笔画", 400)
+    try:
+        radius_m = float(radius_m)
+    except (TypeError, ValueError):
+        raise ApiError("画笔半径无效", 400)
+    if not 0.01 <= radius_m <= 2.0:
+        raise ApiError("画笔半径需要在 0.01~2.0 米之间", 400)
+
+    entry, yaml_path, pgm_path = _map_edit_paths(map_id)
+    geo = _map_geo(yaml_path)
+    map_edit.ensure_backup(pgm_path)
+    map_edit.ensure_base(pgm_path)
+
+    base_path = map_edit.base_path_for(pgm_path)
+    grid = map_edit.read_pgm(base_path)
+    try:
+        changed = map_edit.paint_strokes(grid, geo, strokes, brush, radius_m)
+    except map_edit.MapEditError as exc:
+        raise ApiError(str(exc), 400)
+    map_edit.write_pgm(base_path, grid)
+    map_edit.rebuild(pgm_path, geo, map_edit.load_edits(pgm_path)["zones"])
+    _sync_active_map(entry, pgm_path, yaml_path)
+    return {"success": True, "changed_pixels": changed}
+
+
+def map_edit_zones(map_id, zones):
+    from g1_base import map_edit
+
+    if not isinstance(zones, list):
+        raise ApiError("zones 需要是数组", 400)
+    if len(zones) > 200:
+        raise ApiError("禁行区最多 200 个", 400)
+    entry, yaml_path, pgm_path = _map_edit_paths(map_id)
+    geo = _map_geo(yaml_path)
+    map_edit.ensure_backup(pgm_path)
+    map_edit.save_edits(pgm_path, {"zones": zones})
+    painted = map_edit.rebuild(pgm_path, geo, zones)
+    _sync_active_map(entry, pgm_path, yaml_path)
+    return {"success": True, "zones": zones, "painted_pixels": painted}
+
+
+def map_edit_transform(map_id, action, bbox=None):
+    from g1_base import map_edit
+
+    entry, yaml_path, pgm_path = _map_edit_paths(map_id)
+    geo = _map_geo(yaml_path)
+    zones = map_edit.load_edits(pgm_path)["zones"]
+    note = ""
+
+    if action == "autocrop":
+        def fn(g):
+            return map_edit.autocrop(g, geo)
+    elif action == "crop":
+        if not isinstance(bbox, dict):
+            raise ApiError("裁剪需要 bbox", 400)
+
+        def fn(g):
+            return map_edit.crop(g, geo, bbox)
+    elif action in ("rotate90", "rotate180", "rotate270"):
+        degrees = int(action.replace("rotate", ""))
+
+        def fn(g):
+            return map_edit.rotate(g, geo, degrees)
+
+        # 旋转改的是地图自身的坐标系，而重定位用的 pcd 不跟着转，
+        # 禁行区那些世界坐标也就全对不上了，只能清掉重画。
+        zones = []
+        note = ("地图已旋转。重定位用的 3D 点云不会跟着转，"
+                "需要重新建图，否则定位会对不上。禁行区已清空。")
+    else:
+        raise ApiError("未知的变换: {}".format(action), 400)
+
+    try:
+        new_geo = map_edit.apply_transform_to_all(pgm_path, fn)
+    except map_edit.MapEditError as exc:
+        raise ApiError(str(exc), 400)
+
+    map_edit.write_map_yaml(yaml_path, pgm_path.name, new_geo["resolution"],
+                            new_geo["origin_x"], new_geo["origin_y"])
+    map_edit.save_edits(pgm_path, {"zones": zones})
+    map_edit.rebuild(pgm_path, new_geo, zones)
+    _sync_active_map(entry, pgm_path, yaml_path)
+    grid = map_edit.read_pgm(pgm_path)
+    return {
+        "success": True,
+        "width": int(grid.shape[1]),
+        "height": int(grid.shape[0]),
+        "origin": [new_geo["origin_x"], new_geo["origin_y"]],
+        "message": note,
+    }
+
+
+def map_edit_revert(map_id):
+    from g1_base import map_edit
+
+    entry, yaml_path, pgm_path = _map_edit_paths(map_id)
+    try:
+        map_edit.revert(pgm_path)
+    except map_edit.MapEditError as exc:
+        raise ApiError(str(exc), 400)
+    map_edit.save_edits(pgm_path, {"zones": []})
+    _sync_active_map(entry, pgm_path, yaml_path)
+    return {"success": True, "message": "已还原为最初的地图，禁行区已清空"}
+
+
+def _sync_active_map(entry, pgm_path, yaml_path):
+    """编辑的如果是某张快照，而它正好就是当前激活的那张，把结果同步过去。
+
+    不同步的话，界面上看着改好了，Nav2 加载的还是老的 exhibit_2d_map.pgm。
+    """
+    if entry.get("source") == "active":
+        return                                    # 编辑的就是当前图本身
+    maps_dir = resolve_maps_dir()
+    active_pgm = maps_dir / "{}.pgm".format(MAP_NAME_SUFFIX)
+    active_yaml = maps_dir / "{}.yaml".format(MAP_NAME_SUFFIX)
+    if not active_pgm.is_file() or not active_yaml.is_file():
+        return
+    try:
+        # 分辨率和 origin 都一致才认为是同一张，避免误覆盖别的地图
+        cur = _read_map_yaml(active_yaml)
+        src = _read_map_yaml(yaml_path)
+        if not isinstance(cur, dict) or not isinstance(src, dict):
+            return
+        if str(cur.get("origin")) != str(src.get("origin")):
+            return
+        if str(cur.get("resolution")) != str(src.get("resolution")):
+            return
+    except Exception:
+        return
+    shutil.copy2(pgm_path, active_pgm)
+
+
 # ── 路线 / 巡航点 ──
 
 def _route_path(name):
@@ -2426,6 +2680,32 @@ def make_handler(node: BridgeNode):
             m = re.match(r"^/api/maps/([^/]+)/activate$", path)
             if m and method == "POST":
                 return self._send_json(activate_map(m.group(1)))
+            m = re.match(r"^/api/maps/([^/]+)/edit$", path)
+            if m and method == "GET":
+                return self._send_json(map_edit_state(m.group(1)))
+            m = re.match(r"^/api/maps/([^/]+)/edit/paint$", path)
+            if m and method == "POST":
+                payload = body or {}
+                return self._send_json(map_edit_paint(
+                    m.group(1),
+                    payload.get("strokes"),
+                    payload.get("brush", "occupied"),
+                    payload.get("radius_m", 0.1),
+                ))
+            m = re.match(r"^/api/maps/([^/]+)/edit/zones$", path)
+            if m and method == "POST":
+                return self._send_json(
+                    map_edit_zones(m.group(1), (body or {}).get("zones", []))
+                )
+            m = re.match(r"^/api/maps/([^/]+)/edit/transform$", path)
+            if m and method == "POST":
+                payload = body or {}
+                return self._send_json(map_edit_transform(
+                    m.group(1), str(payload.get("action", "")), payload.get("bbox")
+                ))
+            m = re.match(r"^/api/maps/([^/]+)/edit/revert$", path)
+            if m and method == "POST":
+                return self._send_json(map_edit_revert(m.group(1)))
 
             # ---- 设置 ----
             if method == "GET" and path == "/api/settings/walking_mode":
@@ -2480,6 +2760,11 @@ def parse_args(argv=None):
                         help="nav_msgs/Path 话题，用于在网页地图上画规划路径")
     parser.add_argument("--scan-topic", default="/scan",
                         help="sensor_msgs/LaserScan 话题，用于在网页地图上叠加实时障碍点")
+    parser.add_argument("--battery-topic", default="",
+                        help="sensor_msgs/BatteryState 话题。留空则自动发现——"
+                             "扫描图里所有 BatteryState 类型的话题并订阅第一个。"
+                             "G1 的 unitree_hg LowState_ 里没有任何电池字段（实机确认），"
+                             "所以电量只能来自外部发布者；没有就一直显示未接入。")
     # 摇杆速度上限
     parser.add_argument("--teleop-max-vx", type=float, default=0.45)
     parser.add_argument("--teleop-max-vy", type=float, default=0.25)
