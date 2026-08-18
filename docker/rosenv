@@ -1,12 +1,34 @@
-#!/bin/sh
-# 在容器里以「和各个 ROS 节点完全相同的环境」执行命令。
+#!/bin/bash
+# 在容器里以「和各个 ROS 节点相同的环境」执行命令。
 #
 #   docker exec g1-base rosenv ros2 topic list
 #   docker exec g1-base rosenv ros2 topic echo /odom_2d --once
 #   docker exec -it g1-base rosenv ros2 run tf2_ros tf2_echo map base_link
 #
-# docker exec 不经过 entrypoint，所以 ROS_DOMAIN_ID / CYCLONEDDS_URI / PATH
-# 这些都没设，直接敲 ros2 会 command not found。
-# 这里把 1 号进程（entrypoint 拉起来的那个）的环境整份搬过来，
-# NUL 分隔交给 xargs -0，含空格的值也不会被拆坏。
-exec xargs -0 -a /proc/1/environ env "$@"
+# 为什么需要它：docker exec 不经过 entrypoint。而这个镜像里 ROS 环境
+# 【也不在 1 号进程的环境里】—— start_g1_base.sh 是用绝对路径起 python 的，
+# 从不依赖 ros2 在 PATH 上，所以 entrypoint 只设了 DDS 相关变量。
+# 直接 docker exec 敲 ros2 会 command not found，
+# 只搬 /proc/1/environ 又会 env: 'ros2': No such file or directory。
+# 两样都要：先搬运行期变量（ROS_DOMAIN_ID / CYCLONEDDS_URI 这些只有
+# entrypoint 知道），再 source 各 setup.bash 把 PATH 和 AMENT 叠上去。
+
+set -e
+
+# 1) 搬 1 号进程的环境。跳过 PATH —— 那份 PATH 没有 ROS，
+#    留着 docker exec 自带的，下面 source 时会把 ROS 的 bin 前置进来。
+while IFS= read -r -d '' kv; do
+    case "$kv" in
+        PATH=* | PWD=* | SHLVL=* | _=* | OLDPWD=*) continue ;;
+    esac
+    export "$kv" 2>/dev/null || true
+done < /proc/1/environ
+
+# 2) 叠上 ROS 与两个工作空间。setup.bash 会引用未定义变量，不能开 set -u
+for f in /opt/ros/humble/setup.bash \
+         /root/lio_ws/install/setup.bash \
+         /root/g1_ws/install/setup.bash; do
+    [ -f "$f" ] && source "$f"
+done
+
+exec "$@"
