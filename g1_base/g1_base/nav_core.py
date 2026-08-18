@@ -1782,7 +1782,10 @@ class RobotController:
         self.audio_client = self.sdk_bridge.audio_client
         self.arm_client = self.sdk_bridge.arm_client
 
-        self._wakeup_audio()
+        # 唤醒放后台：这个函数最多要等 10 秒（音频服务没起来时重试 10 次），
+        # 卡在构造函数里会把整个控制服务的启动一起拖住。
+        threading.Thread(target=self._wakeup_audio, name="audio-wakeup",
+                         daemon=True).start()
         self._action_lock = threading.Lock()
         self._is_squatting = False
         self.global_plan_points = []

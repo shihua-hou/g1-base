@@ -1058,3 +1058,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 /* 地图编辑：工具栏下的说明文字压得紧一点，给画布让位 */
 #edit-brush-box .field { margin-top: 8px; }
 #edit-zone-list .wp-row { margin-bottom: 6px; }
+
+/* 编辑页的"已保存"提示：闪一下绿色让人看见，再淡回去 */
+#edit-saved { transition: color .25s ease; }
+#edit-saved.is-ok { color: var(--ok); font-weight: 700; }

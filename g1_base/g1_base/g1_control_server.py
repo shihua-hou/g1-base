@@ -74,10 +74,14 @@ class G1ControlServer(MissionNode):
         self._script_cancel_event = threading.Event()
         self._navigation_cancel_event = threading.Event()
         self._named_action_dir = Path(movement_dir()) / "motions"
+        # 音频原本是关的（基线提交带进来的，没留原因），于是 speak() 一直走
+        # [speech-disabled] 分支——网页上点「试听」、巡航到点讲解、事件播报
+        # 全都没声音，而且不报错。推测当初关掉是因为 _wakeup_audio() 会阻塞
+        # 最多 10 秒拖慢启动；现在唤醒改成后台线程，就没有关掉的理由了。
+        # 真要关（比如展厅要求静音）用环境变量 G1_DISABLE_AUDIO=1。
         self.robot_controller = RobotController(
             self,
             args.net_if,
-            enable_audio=False,
             enable_arm=True,
         )
 

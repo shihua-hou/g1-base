@@ -96,6 +96,57 @@
   function nav(path) { location.hash = "#/" + path; }
   window.addEventListener("hashchange", render);
 
+  // ── 浏览器播报 ──
+  //
+  // 机器人扬声器要靠 SDK 的 audio 进程活着，现场时好时坏；浏览器这条路
+  // 只要页面开着就一定响，所以默认两条一起走。
+  //
+  // 浏览器有个硬限制：没有用户手势之前 speechSynthesis 会被静音策略挡掉。
+  // 所以第一次用户点任意位置时"解锁"一次（念一段空白），之后才能自动播。
+  const speech = {
+    lastId: 0,          // 已经念到哪条
+    unlocked: false,
+    supported: typeof window !== "undefined" && "speechSynthesis" in window,
+  };
+
+  function unlockSpeech() {
+    if (speech.unlocked || !speech.supported) return;
+    try {
+      // 念一个空白，纯粹为了拿到播放权限
+      const u = new SpeechSynthesisUtterance(" ");
+      u.volume = 0;
+      window.speechSynthesis.speak(u);
+      speech.unlocked = true;
+    } catch (_e) { /* 不支持就算了，机器人那条路还在 */ }
+  }
+  document.addEventListener("pointerdown", unlockSpeech, { once: true });
+  document.addEventListener("keydown", unlockSpeech, { once: true });
+
+  function speakInBrowser(text) {
+    if (!speech.supported || !text) return;
+    try {
+      const u = new SpeechSynthesisUtterance(String(text));
+      u.lang = "zh-CN";
+      u.rate = 1.0;
+      window.speechSynthesis.speak(u);
+    } catch (err) {
+      console.warn("浏览器播报失败", err);
+    }
+  }
+
+  // 每次状态刷新后把新条目念掉。服务端已经做完了去重和冷却，
+  // 这里只负责发声——两边逻辑不重复，也就不会跑偏。
+  function drainSpeechQueue() {
+    const q = (state.status && state.status.speech) || null;
+    if (!q || !Array.isArray(q.items)) return;
+    // 首次拿到队列时不补播历史：页面刚打开不该把之前攒的一次性念出来
+    if (speech.lastId === 0) { speech.lastId = q.next_id - 1; return; }
+    q.items
+      .filter((it) => it.id > speech.lastId)
+      .forEach((it) => { speech.lastId = it.id; speakInBrowser(it.text); });
+    if (q.next_id - 1 > speech.lastId) speech.lastId = q.next_id - 1;
+  }
+
   // ── 轮询状态 ──
   function startPolling() {
     stopPolling();
@@ -107,6 +158,7 @@
         state.statusError = String(err.message || err);
       }
       updateLiveRegions();
+      drainSpeechQueue();
     };
     tick();
     state.pollTimer = setInterval(tick, 1500);
@@ -2367,7 +2419,7 @@
         <div class="pane-head">
           <div class="eyebrow">地图</div>
           <span class="map-name" id="edit-name"></span>
-          <span class="hint">单指涂改 / 拉框 · 双指缩放平移</span>
+          <span class="hint" id="edit-saved">改动即时保存</span>
         </div>
         <div class="pane-body flush map-host">
           <div class="map-wrap" id="edit-map"><div class="center-text">加载地图…</div></div>
@@ -2403,6 +2455,18 @@
           <div class="pane-body scroll" id="edit-zone-list"></div>
         </section>
         <section class="pane fixed">
+          <div class="pane-head"><div class="eyebrow">生效</div></div>
+          <div class="pane-body">
+            <p class="note" style="margin-top:0">
+              画的每一笔、每个禁行区都<b>已经存进地图文件</b>，不需要另外保存。
+              但 Nav2 是启动时把地图读进内存的，<b>要重启导航栈才会用上新地图</b>。
+            </p>
+            <div class="btn-row">
+              <button class="btn primary" id="edit-apply">重启导航栈使改动生效</button>
+            </div>
+          </div>
+        </section>
+        <section class="pane fixed">
           <div class="pane-head"><div class="eyebrow">整图操作</div></div>
           <div class="pane-body">
             <div class="btn-row">
@@ -2421,6 +2485,16 @@
 
     const nameEl = document.getElementById("edit-name");
     const tipEl = document.getElementById("edit-tip");
+    const savedEl = document.getElementById("edit-saved");
+
+    // 改动是即时落盘的，但界面上不说的话，用户会一直找"保存"按钮。
+    // 每次成功写入都在这里标一下时间和改了多少。
+    function markSaved(what) {
+      const t = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+      savedEl.textContent = `${what} · 已保存 ${t}`;
+      savedEl.classList.add("is-ok");
+      setTimeout(() => savedEl.classList.remove("is-ok"), 1500);
+    }
 
     async function refreshState() {
       mapEdit.state = await api(`/api/maps/${encodeURIComponent(mapId)}/edit`);
@@ -2447,12 +2521,13 @@
     }
 
     async function saveZones(zones) {
-      const res = await guarded(
-        () => api(`/api/maps/${encodeURIComponent(mapId)}/edit/zones`,
-                  { method: "POST", body: { zones } }), "禁行区已保存");
+      // 不弹 toast：画一个框弹一次太吵，用标题栏的"已保存"提示代替
+      const res = await api(`/api/maps/${encodeURIComponent(mapId)}/edit/zones`,
+                            { method: "POST", body: { zones } });
       mapEdit.state.zones = res.zones || zones;
       renderZones();
       reloadImage();
+      markSaved(`禁行区 ${(res.zones || zones).length} 个`);
     }
 
     // 改完地图要换掉底图：服务端已经重写了 pgm，但 URL 没变，
@@ -2508,6 +2583,10 @@
       await saveZones([]).catch(() => {});
     });
 
+    bindBusy("edit-apply", "重拉定位与 Nav2…",
+             () => api("/api/nav/restart_all", { method: "POST" }),
+             "导航栈已重启，新地图已生效");
+
     bindBusy("edit-autocrop", "裁剪中…", async () => {
       const res = await api(`/api/maps/${encodeURIComponent(mapId)}/edit/transform`,
                             { method: "POST", body: { action: "autocrop" } });
@@ -2552,10 +2631,16 @@
       imageUrl: mapImageUrl(mapId, info.mtime),
       geo: info.geometry,
       onEditStroke: async (stroke) => {
-        await guarded(() => api(`/api/maps/${encodeURIComponent(mapId)}/edit/paint`, {
-          method: "POST",
-          body: { strokes: [stroke], brush: mapEdit.brush, radius_m: mapEdit.radius },
-        }), null).then(reloadImage).catch(() => {});
+        try {
+          const res = await api(`/api/maps/${encodeURIComponent(mapId)}/edit/paint`, {
+            method: "POST",
+            body: { strokes: [stroke], brush: mapEdit.brush, radius_m: mapEdit.radius },
+          });
+          reloadImage();
+          markSaved(`涂改 ${res.changed_pixels || 0} 格`);
+        } catch (err) {
+          toast(String(err.message || err), "error");
+        }
       },
       onEditRect: async (rect) => {
         const zones = [...((mapEdit.state && mapEdit.state.zones) || []), rect];
@@ -2913,6 +2998,20 @@
           </div>
         </div>
 
+        <div class="field" style="margin-top:12px">
+          <label>播报到哪儿</label>
+          <div class="sb-tabs" id="voice-output">
+            ${[["both", "两者"], ["robot", "机器人扬声器"], ["browser", "本机浏览器"]]
+              .map(([k, name]) => `<button class="${
+                (prompts && prompts.output || "both") === k ? "active" : ""
+              }" data-output="${k}">${name}</button>`).join("")}
+          </div>
+          <p class="note" style="margin-top:6px">
+            机器人扬声器要靠 SDK 的音频服务活着，现场时好时坏；浏览器只要页面开着就一定响。
+            ${speech.supported ? "" : "<b>当前浏览器不支持语音合成，「本机浏览器」这项不会有声音。</b>"}
+          </p>
+        </div>
+
         <label class="voice-toggle" style="margin:10px 0 4px">
           <input type="checkbox" id="voice-master" ${prompts && prompts.enabled ? "checked" : ""} />
           <span><b>启用事件播报</b></span>
@@ -2925,7 +3024,8 @@
       </div>
       <div class="pane-foot">
         <button class="btn primary" id="voice-save">保存播报设置</button>
-        <button class="btn" id="voice-test">试听</button>
+        <button class="btn" id="voice-test">试听（机器人）</button>
+        <button class="btn" id="voice-test-browser">试听（本机）</button>
       </div>
     `);
 
@@ -2942,12 +3042,33 @@
       });
     }
 
+    let outputMode = (prompts && prompts.output) || "both";
+    const outputBox = document.getElementById("voice-output");
+    if (outputBox) {
+      outputBox.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("[data-output]");
+        if (!btn) return;
+        outputMode = btn.getAttribute("data-output");
+        [...outputBox.children].forEach((c) => c.classList.toggle("active", c === btn));
+      });
+    }
+
+    document.getElementById("voice-test-browser").addEventListener("click", () => {
+      unlockSpeech();
+      if (!speech.supported) { toast("当前浏览器不支持语音合成", "error"); return; }
+      speakInBrowser("语音播报测试，这是本机浏览器发出的声音");
+    });
+
     bindBusy("voice-test", "播报中…",
              () => api("/api/audio/say", { method: "POST", body: { text: "语音播报测试，当前音量正常" } }),
              "已发送播报");
 
     bindBusy("voice-save", "保存中…", async () => {
-      const patch = { enabled: document.getElementById("voice-master").checked, events: {}, alerts: {} };
+      const patch = {
+        enabled: document.getElementById("voice-master").checked,
+        output: outputMode,
+        events: {}, alerts: {},
+      };
       VOICE_EVENTS.forEach(([sec, key]) => {
         const box = document.querySelector(`[data-v-sec="${sec}"][data-v-key="${key}"]`);
         const txt = document.querySelector(`[data-v-text="${key}"]`);

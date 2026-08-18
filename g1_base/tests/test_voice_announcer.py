@@ -37,6 +37,16 @@ def _make(cfg=None):
     return ann, said
 
 
+def _make_split(output):
+    """分别收集"发给机器人"和"发给浏览器"的两路。"""
+    robot, browser = [], []
+    cfg = __import__("copy").deepcopy(MOD.DEFAULT_VOICE_PROMPTS)
+    cfg["output"] = output
+    MOD.get_voice_prompts = lambda: __import__("copy").deepcopy(cfg)
+    ann = MOD.VoiceAnnouncer(node=None, say=robot.append, enqueue=browser.append)
+    return ann, robot, browser
+
+
 def _status(**kw):
     base = {
         "navigate": {"active": False},
@@ -125,3 +135,36 @@ def test_estop_fires_on_latch_edge():
     ann.tick(_status(control={"stop_latched": True}))
     ann.tick(_status(control={"stop_latched": True}))
     assert said.count("急停已触发") == 1
+
+
+# ── 播报去向 ──
+
+def test_output_robot_only():
+    ann, robot, browser = _make_split("robot")
+    ann.tick(_status())
+    ann.tick(_status(navigate={"active": True}))
+    assert robot == ["开始导航"] and browser == []
+
+
+def test_output_browser_only():
+    """机器人音频服务挂了的时候，这条路必须还能响。"""
+    ann, robot, browser = _make_split("browser")
+    ann.tick(_status())
+    ann.tick(_status(navigate={"active": True}))
+    assert robot == [] and browser == ["开始导航"]
+
+
+def test_output_both_goes_to_both():
+    ann, robot, browser = _make_split("both")
+    ann.tick(_status())
+    ann.tick(_status(navigate={"active": True}))
+    assert robot == ["开始导航"] and browser == ["开始导航"]
+
+
+def test_cooldown_is_shared_across_outputs():
+    """冷却按事件算，不能因为有两路就播两遍。"""
+    ann, robot, browser = _make_split("both")
+    for _ in range(6):
+        ann.tick(_status(navigation_manager={"state": "ERROR"}))
+        ann.tick(_status(navigation_manager={"state": "DEGRADED_LOCALIZATION"}))
+    assert len(robot) == 1 and len(browser) == 1

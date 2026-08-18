@@ -7,6 +7,11 @@
 
 enabled: true
 
+# 播报到哪儿：robot=机器人扬声器 / browser=打开网页的设备 / both=两者。
+# 默认 both——机器人的音频服务时好时坏（依赖 SDK 的 audio 进程活着），
+# 浏览器这条路只要页面开着就一定响，两条一起走最稳。
+output: both
+
 events:
   nav_start:
     enabled: true

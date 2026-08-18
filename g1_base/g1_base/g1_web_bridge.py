@@ -727,7 +727,12 @@ class BridgeNode(Node):
         # ── 事件播报 ──
         # 1Hz 比对状态快照。播报本身走 _announce，失败只记日志，
         # 绝不让音频问题拖垮状态轮询。
-        self.voice = VoiceAnnouncer(self, self._announce)
+        # 给浏览器播报用的小环形队列。页面每 1.5 秒拉一次状态时顺带取走，
+        # 各自记住自己念到哪条，所以多个页面同时开着都能听到。
+        self._speech_lock = threading.Lock()
+        self._speech_items = []
+        self._speech_next_id = 1
+        self.voice = VoiceAnnouncer(self, self._announce, self._enqueue_speech)
         self.create_timer(1.0, self._voice_tick, callback_group=self._group)
         self.act_navigate = ActionClient(self, NavigateToTarget, "/g1_control/navigate_to_target", callback_group=self._group)
 
@@ -963,6 +968,7 @@ class BridgeNode(Node):
             "navigate": self.navigate_snapshot(),
             "pose": self.current_pose(),
             "current_map": read_current_map_manifest(resolve_maps_dir()),
+            "speech": self.speech_queue(),
             "system": self.system_info(),
             "timestamp": time.time(),
         }
@@ -1108,6 +1114,24 @@ class BridgeNode(Node):
         except Exception as exc:
             self.get_logger().warning(f"[voice] 播报失败: {text} -> {exc}")
             return False
+
+    def _enqueue_speech(self, text):
+        with self._speech_lock:
+            self._speech_items.append({
+                "id": self._speech_next_id, "text": str(text), "ts": time.time(),
+            })
+            self._speech_next_id += 1
+            # 只留最近 20 条：页面关着的时候不该攒一堆，重新打开时连珠炮
+            if len(self._speech_items) > 20:
+                del self._speech_items[:-20]
+
+    def speech_queue(self, max_age=30.0):
+        """最近待播报的条目。太旧的丢掉——页面刚打开不该补播十分钟前的事。"""
+        now = time.time()
+        with self._speech_lock:
+            items = [dict(it) for it in self._speech_items if now - it["ts"] <= max_age]
+            next_id = self._speech_next_id
+        return {"items": items, "next_id": next_id}
 
     def _voice_tick(self):
         try:
@@ -1487,6 +1511,10 @@ def voice_prompts_file():
 # 播种失败或文件被删时的兜底，保证播报功能不因为缺文件就整个失效
 DEFAULT_VOICE_PROMPTS = {
     "enabled": True,
+    # 播报到哪儿：robot=机器人扬声器 / browser=打开网页的设备 / both=两者。
+    # 默认 both：机器人音频服务时好时坏（SDK 的 AudioClient 依赖 audio
+    # 进程活着），浏览器这条路只要页面开着就一定响，两条一起走最稳。
+    "output": "both",
     "events": {
         "nav_start":    {"enabled": True, "text": "开始导航",   "cooldown_sec": 3},
         "nav_arrived":  {"enabled": True, "text": "已到达",     "cooldown_sec": 3},
@@ -1516,6 +1544,8 @@ def get_voice_prompts():
     merged = copy.deepcopy(DEFAULT_VOICE_PROMPTS)
     if isinstance(data.get("enabled"), bool):
         merged["enabled"] = data["enabled"]
+    if data.get("output") in ("robot", "browser", "both"):
+        merged["output"] = data["output"]
     for section in ("events", "alerts"):
         incoming = data.get(section) or {}
         if not isinstance(incoming, dict):
@@ -1534,6 +1564,8 @@ def set_voice_prompts(patch):
     data = get_voice_prompts()
     if isinstance(patch.get("enabled"), bool):
         data["enabled"] = patch["enabled"]
+    if patch.get("output") in ("robot", "browser", "both"):
+        data["output"] = patch["output"]
     for section in ("events", "alerts"):
         incoming = patch.get(section) or {}
         if not isinstance(incoming, dict):
@@ -2155,9 +2187,10 @@ class VoiceAnnouncer:
     代价是最长有一个 tick 的延迟（1 秒），对语音提示完全够用。
     """
 
-    def __init__(self, node, say):
+    def __init__(self, node, say, enqueue=None):
         self._node = node
         self._say = say                 # 注入，方便测试时换成假的
+        self._enqueue = enqueue          # 推给浏览器播报的队列
         self._last_said = {}            # key -> 上次播报时刻，用于冷却
         self._prev = {}                 # 上一拍的关键状态，用于识别"变化"
 
@@ -2173,7 +2206,11 @@ class VoiceAnnouncer:
         if now - self._last_said.get(key, 0.0) < cooldown:
             return
         self._last_said[key] = now
-        self._say(text)
+        output = cfg.get("output", "both")
+        if output in ("robot", "both"):
+            self._say(text)
+        if output in ("browser", "both") and self._enqueue is not None:
+            self._enqueue(text)
 
     def tick(self, status):
         try:
