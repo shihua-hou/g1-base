@@ -914,6 +914,9 @@
     wedge: "rgba(23, 131, 106, .20)",
     placeHalo: "rgba(184, 69, 63, .16)",
     ink: cssVar("--ink", "#16202b"),
+    // 实时激光：用边缘色青绿，跟静态地图的黑白灰拉开，一眼分得清
+    // "地图里记着的障碍物" 和 "此刻真的挡在前面的东西"
+    scan: cssVar("--edge", "#1fa89f"),
   };
   const HOLD_MS = 320;   // 长按多久算"放置"，短于这个就是普通拖动地图
 
@@ -944,6 +947,7 @@
       let moved = 0;
       let objectUrl = null;
       let path = [];             // 世界坐标点列，Nav2 规划出来的路径
+      let scan = [];             // 世界坐标点列，/scan 投出来的实时障碍点
       let placing = null;        // 长按放置中：{ px, py, world, yaw_deg, cur }
       let holdTimer = null;
       let dragWp = -1;           // 正在拖动的巡航点下标
@@ -1086,6 +1090,20 @@
         ctx.stroke();
       }
 
+      // 实时激光点。点很多（一圈 180 个），用 fillRect 而不是 arc：
+      // arc 每个点都要走一次路径栈，机器人转身时会明显掉帧。
+      function drawScan() {
+        if (!scan.length) return;
+        const size = Math.max(1.5, Math.min(3, 2 * view.scale));
+        ctx.fillStyle = MAP_COLORS.scan;
+        ctx.globalAlpha = 0.85;
+        for (let i = 0; i < scan.length; i++) {
+          const p = worldPoint(scan[i][0], scan[i][1]);
+          ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+        }
+        ctx.globalAlpha = 1;
+      }
+
       function draw() {
         const w = wrapEl.clientWidth, h = wrapEl.clientHeight;
         if (!w || !h) return;
@@ -1101,6 +1119,7 @@
         ctx.restore();
 
         drawPath();
+        drawScan();
 
         // 巡航点之间连虚线，看得出巡航顺序
         if (waypoints.length > 1) {
@@ -1305,6 +1324,7 @@
         setWaypoints(list) { waypoints = list || []; draw(); },
         setMarks(list) { marks = list || []; draw(); },
         setPath(points) { path = points || []; draw(); },
+        setScan(points) { scan = points || []; draw(); },
         setImage(url, newGeo) {
           if (newGeo) geo = newGeo;
           img.src = url;
@@ -1568,9 +1588,26 @@
     pullPlan();
     const planTimer = setInterval(pullPlan, 1000);
 
+    // 实时激光：静态 pgm 只是建图那一刻的世界，现场多出来的人和箱子只能靠它看。
+    // 500ms 一次 —— /scan 本身 10Hz，再快也只是徒增流量，而人走动的尺度上
+    // 半秒的滞后看不出来。
+    let scanBusy = false;
+    const pullScan = async () => {
+      if (scanBusy || !navUi.view) return;
+      scanBusy = true;
+      try {
+        const res = await api("/api/nav/scan");
+        if (navUi.view) navUi.view.setScan(res.points || []);
+      } catch (_e) { /* 老版本网关没这个接口，静默降级成不画激光 */ }
+      finally { scanBusy = false; }
+    };
+    pullScan();
+    const scanTimer = setInterval(pullScan, 500);
+
     onPageLeave(() => {
       clearInterval(markTimer);
       clearInterval(planTimer);
+      clearInterval(scanTimer);
       if (navUi.view && navUi.view.destroy) navUi.view.destroy();
       navUi.view = null;
     });

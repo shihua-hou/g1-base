@@ -50,10 +50,11 @@ from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
 try:
-    from sensor_msgs.msg import CompressedImage, PointCloud2
+    from sensor_msgs.msg import CompressedImage, LaserScan, PointCloud2
     from sensor_msgs_py import point_cloud2 as pc2
 except ImportError:  # pragma: no cover - 缺这些只影响实时地图与相机
     CompressedImage = None
+    LaserScan = None
     PointCloud2 = None
     pc2 = None
 
@@ -754,6 +755,78 @@ class BridgeNode(Node):
                 NavPath, args.plan_topic, self._on_plan,
                 QoSPresetProfiles.SYSTEM_DEFAULT.value, callback_group=self._group,
             )
+
+        # ── 实时激光：地图上叠一层"此刻真的挡在前面的东西" ──
+        # 静态 pgm 只记着建图那一刻的世界，现场多出来的人和箱子全靠这层看。
+        self._scan_lock = threading.Lock()
+        self._scan = None
+        self._scan_stamp = 0.0
+        if LaserScan is not None:
+            self.create_subscription(
+                LaserScan, args.scan_topic, self._on_scan_msg,
+                QoSPresetProfiles.SENSOR_DATA.value, callback_group=self._group,
+            )
+
+    def _on_scan_msg(self, msg):
+        # 只存原始量，不在这里做坐标变换：这个回调 10Hz，而网页 2~4Hz 才取一次，
+        # 放到取的时候再算既省 CPU，用的也是更新的位姿。
+        with self._scan_lock:
+            self._scan = (
+                float(msg.angle_min), float(msg.angle_increment),
+                float(msg.range_min), float(msg.range_max),
+                list(msg.ranges),
+            )
+            self._scan_stamp = time.time()
+
+    def scan_snapshot(self, max_points=540):
+        """把 /scan 投到地图坐标系，给网页画点。
+
+        /scan 是 base_link 系的（navigation.launch.py 的 target_frame），
+        所以要拿当前位姿把它旋转平移过去。位姿比激光晚几十毫秒，机器人
+        转身时点会有一点拖影，但对"前面有没有东西"这个判断足够了。
+        """
+        with self._scan_lock:
+            scan, stamp = self._scan, self._scan_stamp
+        age = (time.time() - stamp) if stamp else None
+        fresh = age is not None and age < 3.0
+        pose = self.current_pose() if fresh and scan else None
+        if not fresh or scan is None or pose is None:
+            return {
+                "available": LaserScan is not None,
+                "fresh": False,
+                "age_sec": round(age, 2) if age is not None else None,
+                "points": [],
+                "count": 0,
+            }
+
+        angle_min, angle_inc, range_min, range_max, ranges = scan
+        # 抽稀到 max_points 以内：一圈 180 个点时步长就是 1，不损失；
+        # 换成高线数雷达也不会把画布和带宽撑爆。
+        step = max(1, math.ceil(len(ranges) / float(max_points)))
+        yaw = math.radians(float(pose.get("yaw_deg") or 0.0))
+        cos_y, sin_y = math.cos(yaw), math.sin(yaw)
+        px, py = float(pose.get("x") or 0.0), float(pose.get("y") or 0.0)
+
+        pts = []
+        for i in range(0, len(ranges), step):
+            r = ranges[i]
+            # inf / nan 表示这个方向没有回波，range_min 以内的是自身遮挡
+            if not math.isfinite(r) or r < range_min or r > range_max:
+                continue
+            a = angle_min + i * angle_inc
+            bx, by = r * math.cos(a), r * math.sin(a)
+            pts.append([
+                round(px + bx * cos_y - by * sin_y, 3),
+                round(py + bx * sin_y + by * cos_y, 3),
+            ])
+
+        return {
+            "available": True,
+            "fresh": True,
+            "age_sec": round(age, 2),
+            "points": pts,
+            "count": len(pts),
+        }
 
     def _on_plan(self, msg):
         # 路径动辄上千个点，按最小间距抽稀后再给前端，省带宽也省画布
@@ -1955,6 +2028,8 @@ def make_handler(node: BridgeNode):
 
             if method == "GET" and path == "/api/nav/path":
                 return self._send_json(node.plan_snapshot())
+            if method == "GET" and path == "/api/nav/scan":
+                return self._send_json(node.scan_snapshot())
             if method == "POST" and path == "/api/nav/cancel":
                 return self._send_json(node.cancel_navigate())
 
@@ -2136,6 +2211,8 @@ def parse_args(argv=None):
                              "订阅端会拿到交替混合的位姿，而且停止建图后图标也不消失")
     parser.add_argument("--plan-topic", default="/plan",
                         help="nav_msgs/Path 话题，用于在网页地图上画规划路径")
+    parser.add_argument("--scan-topic", default="/scan",
+                        help="sensor_msgs/LaserScan 话题，用于在网页地图上叠加实时障碍点")
     # 摇杆速度上限
     parser.add_argument("--teleop-max-vx", type=float, default=0.45)
     parser.add_argument("--teleop-max-vy", type=float, default=0.25)
