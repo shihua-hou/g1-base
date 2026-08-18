@@ -1,7 +1,0 @@
-route_name: "default"
-waypoints:
-  - x: 9.862
-    y: -5.135
-    yaw_deg: 51.815
-    action_id: 31
-    say_text: "企业数据治理体系"

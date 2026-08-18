@@ -387,9 +387,13 @@ class G1ControlServer(MissionNode):
             "y": float(request.target_pose.pose.position.y),
             "yaw": self._yaw_from_pose(request.target_pose),
             "align_final_yaw": bool(request.align_final_yaw),
-            "action_id": None,
-            "say_text": "",
+            # 之前这两项写死成 None/""，而 action 里也没有对应字段——
+            # 于是巡航点上配的「动作 31 · 定位区」是死数据，机器人走到了
+            # 既不做动作也不说话。现在由调用方（巡航）传进来。
+            "action_id": int(request.action_id),
+            "say_text": str(request.say_text or ""),
         }
+        perform_interaction = bool(request.perform_interaction)
 
         with self._runtime_lock:
             self._set_activity("navigating", f"目标: {waypoint_name}")
@@ -398,7 +402,7 @@ class G1ControlServer(MissionNode):
                 result = self.navigate_to_waypoint(
                     waypoint,
                     self.robot_controller,
-                    perform_interaction=False,
+                    perform_interaction=perform_interaction,
                     announce_failures=False,
                     feedback_cb=lambda phase, distance: self._publish_feedback(
                         goal_handle, phase, distance

@@ -1084,6 +1084,11 @@ class BridgeNode(Node):
         pose.pose.orientation.w = qw
         goal.target_pose = pose
         goal.align_final_yaw = bool(align_final_yaw)
+        # 单点导航不讲解：网页上点一个目标点只是让它过去，
+        # 不该突然做动作说话。讲解只发生在巡航。
+        goal.perform_interaction = False
+        goal.action_id = 0
+        goal.say_text = ""
 
         self._nav_feedback = {
             "active": True, "waypoint_name": waypoint_name, "phase": "sending", "distance_to_goal": None,
@@ -1149,8 +1154,14 @@ class BridgeNode(Node):
                 pass
         return {"success": True, "message": "已请求取消导航"}
 
-    def navigate_blocking(self, waypoint_name, x, y, yaw, align_final_yaw=True, timeout=180.0):
-        """阻塞版本，供巡航线程按顺序调用各个路点。"""
+    def navigate_blocking(self, waypoint_name, x, y, yaw, align_final_yaw=True, timeout=180.0,
+                          perform_interaction=False, action_id=0, say_text=""):
+        """阻塞版本，供巡航线程按顺序调用各个路点。
+
+        perform_interaction/action_id/say_text 是巡航讲解用的：到点后先做
+        动作再念讲解词。之前这三样传不下去，巡航就只是"连续走点"，
+        巡航点里配的动作和讲解词全是死数据。
+        """
         if not self.act_navigate.wait_for_server(timeout_sec=5.0):
             raise ApiError("导航动作服务不可用", 503)
 
@@ -1165,6 +1176,9 @@ class BridgeNode(Node):
         pose.pose.orientation.w = qw
         goal.target_pose = pose
         goal.align_final_yaw = bool(align_final_yaw)
+        goal.perform_interaction = bool(perform_interaction)
+        goal.action_id = int(action_id or 0)
+        goal.say_text = str(say_text or "")
 
         send_future = self.act_navigate.send_goal_async(goal)
         done = threading.Event()
@@ -1210,6 +1224,9 @@ class BridgeNode(Node):
                         self._patrol_state.update({"index": idx, "message": f"前往路点 {idx}/{len(waypoints)}"})
                     result = self.navigate_blocking(
                         wp.get("name", f"wp{idx}"), wp["x"], wp["y"], wp["yaw"], True,
+                        perform_interaction=True,
+                        action_id=wp.get("action_id", 0),
+                        say_text=wp.get("say_text", ""),
                     )
                     if not result.get("success"):
                         with self._patrol_lock:

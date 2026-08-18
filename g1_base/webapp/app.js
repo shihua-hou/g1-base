@@ -2197,14 +2197,17 @@
       onWaypointMove: () => { renderWpList(); },
     });
 
-    // 进页面时自动载入当前巡航状态里的路线，或第一条已保存路线
+    // 进页面时自动载入当前巡航状态里的路线，其次是上次选的，最后才自动挑一条。
+    // 自动挑的时候优先 default —— 之前直接取 routes[0]（文件名排序第一个），
+    // 一旦 default 不存在就会莫名其妙载入另一条路线，现场看到一堆自己没加过的点。
     const running = (state.status && state.status.patrol) || {};
     if (running.route_name) await loadRoute(running.route_name);
     else if (navUi.routeName) await loadRoute(navUi.routeName);
     else {
       try {
         const routes = await api("/api/routes");
-        if (routes.length) await loadRoute(routes[0].name);
+        const pick = routes.find((r) => r.name === "default") || routes[0];
+        if (pick) await loadRoute(pick.name);
         else renderWpList();
       } catch (_e) { renderWpList(); }
     }

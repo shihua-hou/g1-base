@@ -1,7 +1,0 @@
-route_name: "default"
-waypoints:
-  - x: -5.439
-    y: 0.606
-    yaw_deg: -123.036
-    action_id: 31
-    say_text: "欢迎区"

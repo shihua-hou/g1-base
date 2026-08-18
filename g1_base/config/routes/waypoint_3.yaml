@@ -1,7 +1,0 @@
-route_name: "default"
-waypoints:
-  - x: -0.055
-    y: -0.084
-    yaw_deg: -0.441
-    action_id: 31
-    say_text: "定位区"

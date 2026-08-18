@@ -1,6 +1,13 @@
 string waypoint_name
 geometry_msgs/PoseStamped target_pose
 bool align_final_yaw
+# 到点后是否做讲解（播报 say_text + 执行 action_id）。
+# 单点导航填 false；巡航填 true，否则走到了也不说不动。
+bool perform_interaction
+# 到点后要做的预设动作编号。<=0 表示不做动作。
+int32 action_id
+# 到点后要念的话。留空则不念。
+string say_text
 ---
 bool success
 string status

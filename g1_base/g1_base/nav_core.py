@@ -1932,22 +1932,44 @@ class RobotController:
         return self.get_volume() if self.get_volume() is not None else target
 
     def perform_interaction(self, text, action_id):
-        self.node.get_logger().info(f"执行交互: action_id={action_id}")
-        if self.arm_client is not None:
+        """到点讲解：做个动作 + 念一段话 + 复位。
+
+        动作和讲解各自可缺省：巡航点只填了讲解词就只说话，只填了动作就
+        只做动作。原来这里对空参数不设防——action_id 为 None 时
+        ExecuteAction 抛异常被吞掉，接着念空串、再白做一次复位动作，
+        平白多花五秒还看不出为什么。
+        """
+        text = str(text or "").strip()
+        try:
+            action_id = int(action_id) if action_id is not None else 0
+        except (TypeError, ValueError):
+            action_id = 0
+        do_action = self.arm_client is not None and action_id > 0
+        self.node.get_logger().info(
+            f"执行交互: action_id={action_id if do_action else '无'} 讲解={'有' if text else '无'}"
+        )
+        if not do_action and not text:
+            return
+
+        if do_action:
             try:
                 self.arm_client.ExecuteAction(action_id)
                 time.sleep(2.0)
             except Exception as exc:
                 self.node.get_logger().error(f"动作执行失败: {exc}")
 
-        self.speak(text)
-        estimated_speech_time = len(text) * 0.195
-        self.node.get_logger().info(
-            f"预计讲解时长 {estimated_speech_time:.1f}s，等待讲解结束"
-        )
-        time.sleep(estimated_speech_time)
+        if text:
+            self.speak(text)
+            # TtsMaker 是异步的，没有"念完了"的回调，只能按字数估时间等它。
+            # 0.195s/字 是现场调出来的经验值，宁可多等一点也别把话打断。
+            estimated_speech_time = len(text) * 0.195
+            self.node.get_logger().info(
+                f"预计讲解时长 {estimated_speech_time:.1f}s，等待讲解结束"
+            )
+            time.sleep(estimated_speech_time)
 
-        if self.arm_client is not None:
+        # 没做动作就没什么好复位的
+        if do_action:
             try:
                 self.arm_client.ExecuteAction(99)
                 time.sleep(3.0)
