@@ -120,3 +120,39 @@ def test_pc2_localization_resolves_maps_dir_like_the_web_bridge():
 def test_start_scripts_are_syntax_valid():
     for script_name in (*PC2_SCRIPTS, *ENTRYPOINT_SCRIPTS):
         subprocess.run(["bash", "-n", str(G1_BASE_ROOT / script_name)], check=True)
+
+
+def _maps_dir_from_robot_env(env_assignments: str) -> str:
+    """source 一遍 robot_env.sh，把它算出来的 G1_MAPS_DIR 打印出来。"""
+    script = (
+        f"set -e; {env_assignments} "
+        f'source "{G1_BASE_ROOT.as_posix()}/config/robot_env.sh"; '
+        "echo \"$G1_MAPS_DIR\""
+    )
+    out = subprocess.run(
+        ["bash", "-c", script], check=True, capture_output=True, text=True
+    )
+    return out.stdout.strip().splitlines()[-1]
+
+
+def test_container_maps_dir_lands_on_the_data_volume():
+    """容器里 G1_MAPS_DIR 必须跟着数据卷走。
+
+    写死 $HOME/g1_maps 的话，容器里就是 /root/g1_maps —— 那是可写层不是卷，
+    每次 up -d 重建容器现场建的图全没。而且网关 / navigation_manager /
+    start_pc2_localization.sh 三处都以 G1_MAPS_DIR 优先，一旦它指错，
+    那三处各自的 G1_DATA_DIR 兜底分支就永远走不到。
+    """
+    assert _maps_dir_from_robot_env("G1_DATA_DIR=/data;") == "/data/maps"
+
+
+def test_bare_metal_maps_dir_keeps_home_default():
+    """裸机没有 G1_DATA_DIR，行为不能变。"""
+    got = _maps_dir_from_robot_env("unset G1_DATA_DIR; HOME=/home/unitree; G1_USER_HOME=/home/unitree;")
+    assert got == "/home/unitree/g1_maps"
+
+
+def test_explicit_maps_dir_still_wins():
+    """现场显式指定的仍然最高优先级。"""
+    got = _maps_dir_from_robot_env("G1_DATA_DIR=/data; G1_MAPS_DIR=/mnt/usb/maps;")
+    assert got == "/mnt/usb/maps"

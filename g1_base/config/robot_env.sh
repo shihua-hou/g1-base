@@ -16,6 +16,15 @@ fi
 : "${WORKSPACE_SETUP:=$G1_BASE_ROOT/install/setup.bash}"
 : "${G1_INTERFACES_SETUP:=$G1_USER_HOME/g1_ws/install/setup.bash}"
 : "${CYCLONEDDS_HOME:=$G1_USER_HOME/cyclonedds/install}"
+# 地图目录：容器里必须落在数据卷上。G1_DATA_DIR 由镜像的 ENV 提供（挂载点），
+# 裸机没有这个变量，仍然回落到 ~/g1_maps，行为不变。
+# 这里如果直接写死 $G1_USER_HOME/g1_maps，容器里 HOME=/root，地图就存进了
+# 容器可写层 —— 每次 docker compose up -d 重建容器，现场建的图全丢，
+# 而且网关/navigation_manager/start_pc2_localization.sh 三处都以本变量优先，
+# 它们各自的 G1_DATA_DIR 分支会变成永远走不到的死代码。
+if [[ -n "${G1_DATA_DIR:-}" ]]; then
+    : "${G1_MAPS_DIR:=$G1_DATA_DIR/maps}"
+fi
 : "${G1_MAPS_DIR:=$G1_USER_HOME/g1_maps}"
 
 : "${ROS_DOMAIN_ID:=42}"
