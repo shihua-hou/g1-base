@@ -7,8 +7,24 @@ export G1_BASE_ROOT="$ROOT_DIR"
 
 source "$ROOT_DIR/config/robot_env.sh"
 
+# 地图目录：必须和 start_pc2_localization.sh / 网关三方一致。
+# 之前这里写死 $ROOT_DIR/config/maps（镜像里的出厂地图），而重定位读的是
+# 数据卷里现场建的图 —— 于是 Super-LIO 在你的地图坐标系里算位姿，Nav2 却
+# 拿另一个场馆的底图做代价地图，界面上位姿画得完全不对，两边还都不报错。
+resolve_maps_dir() {
+    if [[ -n "${G1_MAPS_DIR:-}" ]]; then
+        echo "$G1_MAPS_DIR"
+    elif [[ -n "${G1_DATA_DIR:-}" ]]; then
+        echo "$G1_DATA_DIR/maps"
+    else
+        echo "$ROOT_DIR/config/maps"
+    fi
+}
+
 resolve_default_map_file() {
-    local maps_dir="$ROOT_DIR/config/maps"
+    local maps_dir
+    maps_dir="$(resolve_maps_dir)"
+    # exhibit_2d_map.yaml 是「设为当前」时写过去的那张，优先用它
     local default_map="$maps_dir/exhibit_2d_map.yaml"
 
     if [[ -f "$default_map" ]]; then
@@ -20,6 +36,13 @@ resolve_default_map_file() {
     latest_map="$(find "$maps_dir" -maxdepth 1 -type f -name '*_exhibit_2d_map.yaml' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2-)"
     if [[ -n "$latest_map" ]]; then
         echo "$latest_map"
+        return
+    fi
+
+    # 兜底：数据卷里一张图都没有时，用包内出厂地图，至少让 Nav2 起得来
+    local packaged="$ROOT_DIR/config/maps/exhibit_2d_map.yaml"
+    if [[ "$maps_dir" != "$ROOT_DIR/config/maps" && -f "$packaged" ]]; then
+        echo "$packaged"
         return
     fi
 

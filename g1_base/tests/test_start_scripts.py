@@ -87,15 +87,37 @@ def test_start_scripts_map_legacy_topic_env_to_navigation_manager_args():
         assert "--relocal-odom-topic" in content
 
 
-def test_start_navigation_defaults_to_packaged_config_map():
+def test_start_navigation_resolves_maps_dir_like_the_web_bridge():
+    """Nav2 的 pgm 必须和重定位的 pcd 来自同一个目录。
+
+    这里原本写死 $ROOT_DIR/config/maps —— 镜像里的出厂地图。而重定位读的是
+    数据卷里现场建的图，于是 Super-LIO 在现场地图的坐标系里算位姿，Nav2 却
+    拿另一个场馆的底图做代价地图，界面上位姿完全对不上，两边都不报错。
+    """
     content = _read_script("start_navigation.sh")
 
-    assert "current_map.json" not in content
-    assert "G1_MAPS_DIR" not in content
-    assert 'local maps_dir="$ROOT_DIR/config/maps"' in content
+    assert 'if [[ -n "${G1_MAPS_DIR:-}" ]]' in content
+    assert 'echo "$G1_DATA_DIR/maps"' in content
+    assert 'maps_dir="$(resolve_maps_dir)"' in content
     assert 'local default_map="$maps_dir/exhibit_2d_map.yaml"' in content
     assert "-name '*_exhibit_2d_map.yaml'" in content
     assert 'MAP_FILE="${MAP_FILE:-$(resolve_default_map_file)}"' in content
+    # 数据卷空时兜底回包内出厂图，至少让 Nav2 起得来
+    assert 'local packaged="$ROOT_DIR/config/maps/exhibit_2d_map.yaml"' in content
+
+
+def test_navigation_and_localization_agree_on_the_maps_dir():
+    """两个脚本的 resolve_maps_dir 必须逐字一致，任何一边漂移都会导致
+    Nav2 和重定位用两张不同的地图。"""
+    import re
+
+    def _fn(name):
+        text = _read_script(name)
+        m = re.search(r"^resolve_maps_dir\(\) \{.*?^\}", text, re.S | re.M)
+        assert m, f"{name} 里没有 resolve_maps_dir"
+        return m.group(0)
+
+    assert _fn("start_navigation.sh") == _fn("start_pc2_localization.sh")
 
 
 def test_pc2_localization_resolves_maps_dir_like_the_web_bridge():
