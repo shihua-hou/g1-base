@@ -90,6 +90,8 @@ def _webapp_dir():
 
 WEBAPP_DIR = _webapp_dir()
 MAP_NAME_SUFFIX = "exhibit_2d_map"
+# 与 navigation_manager.MANIFEST_FILENAME 同名，两边都会写它
+CURRENT_MAP_MANIFEST = "current_map.json"
 
 # 摇杆遥操作话题：g1_control_server 订阅它并转成 set_manual_velocity
 TELEOP_TOPIC = "/g1_control/teleop_cmd_vel"
@@ -1267,7 +1269,7 @@ def walking_mode_file():
 
 
 def read_current_map_manifest(maps_dir):
-    manifest_path = maps_dir / "current_map.json"
+    manifest_path = maps_dir / CURRENT_MAP_MANIFEST
     if not manifest_path.is_file():
         return None
     try:
@@ -1390,10 +1392,41 @@ def activate_map(map_id):
     else:
         note = "（这张图没有配套的 3D 点云，重定位仍会用上一张，建议重新建图）"
 
+    write_current_map_manifest(maps_dir, entry, has_pcd=src_pcd.is_file())
+
     return {
         "success": True,
         "message": f"已将 {entry['label']} 设为当前地图，需要在「设置」中重启导航栈生效{note}",
     }
+
+
+def write_current_map_manifest(maps_dir, entry, has_pcd):
+    """把 current_map.json 指到刚激活的这张图。
+
+    这个 manifest 原先只有 navigation_manager 建完图时会写，activate_map
+    只搬文件不动它 —— 于是「设为当前」换了张图之后，界面上的「当前地图」
+    还显示着最后一次建图的名字，bot_mind 取到的指针也是旧的。
+    字段与 navigation_manager._write_current_map_manifest 保持一致。
+    """
+    base_name = entry["base_name"]
+    payload = {
+        "base_name": base_name,
+        "status": "ready",
+        "pgm": f"{base_name}_{MAP_NAME_SUFFIX}.pgm",
+        "yaml": f"{base_name}_{MAP_NAME_SUFFIX}.yaml",
+        "pcd": f"{base_name}_map.pcd" if has_pcd else None,
+        "started_at": None,
+        "finished_at": datetime.now().isoformat(timespec="seconds"),
+        "last_snapshot_at": None,
+        "reason": "activated_by_user",
+        "error": None,
+        "tilt": None,
+        "label": entry.get("label"),
+    }
+    path = maps_dir / CURRENT_MAP_MANIFEST
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def delete_map(map_id):

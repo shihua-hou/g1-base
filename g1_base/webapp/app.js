@@ -98,7 +98,14 @@
     "status-col": () => statusColHtml(),
     "state-nav": () => stateNavHtml(),
     "state-detail": () => stateDetailHtml(),
+    "nav-map-name": () => navMapNameHtml(),
   };
+
+  function navMapNameHtml() {
+    const cm = (state.status && state.status.current_map) || null;
+    const cls = cm ? "" : " is-warn";
+    return `<span class="map-name-tag${cls}">${escapeHtml(currentMapLabel())}</span>`;
+  }
 
   function connDotHtml() {
     const ok = !!state.status && !state.statusError;
@@ -1617,11 +1624,19 @@
   }
 
   // 地图面板（三个导航子页共用）
+  // 当前地图名。设为当前之后 current_map.json 会被改写，所以这里跟着状态刷新。
+  function currentMapLabel() {
+    const cm = (state.status && state.status.current_map) || null;
+    if (!cm) return "未选择地图";
+    return cm.label || cm.base_name || "未知地图";
+  }
+
   function navMapPaneHtml(hint) {
     return `
       <section class="pane">
         <div class="pane-head">
           <div class="eyebrow">地图</div>
+          <span class="map-name" data-live="nav-map-name">${navMapNameHtml()}</span>
           <span class="hint">${escapeHtml(hint)}</span>
         </div>
         <div class="pane-body flush map-host">

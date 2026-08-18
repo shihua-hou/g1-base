@@ -982,3 +982,29 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* 导航页地图面板上的当前地图名。放在 eyebrow 和 hint 之间，
+   没设图时转警示色 —— 现场"点了导航没反应"多半就是压根没选图。 */
+.pane-head .map-name { min-width: 0; }
+.map-name-tag {
+  display: inline-block;
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 16em;
+  vertical-align: middle;
+}
+.map-name-tag.is-warn {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
