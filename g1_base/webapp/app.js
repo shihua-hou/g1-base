@@ -861,7 +861,7 @@
     }
     listEl.innerHTML = `<div class="list">${maps.map((m) => `
       <div class="list-item ${m.id === state.selectedMapId ? "selected" : ""}" data-select="${escapeHtml(m.id)}">
-        ${m.pgm_exists ? `<img class="thumb" src="${state.baseUrl}/api/maps/${encodeURIComponent(m.id)}/image" loading="lazy" />` : ""}
+        ${m.pgm_exists ? `<img class="thumb" src="${mapImageUrl(m.id, m.mtime)}" loading="lazy" />` : ""}
         <div class="info">
           <div class="name">${escapeHtml(m.label)} ${m.is_active ? '<span class="badge">当前</span>' : ""}</div>
           <div class="meta">${m.source === "hall" ? "场馆预设" : m.source === "active" ? "使用中" : "历史快照"} · ${new Date(m.mtime * 1000).toLocaleDateString()}</div>
@@ -1464,12 +1464,25 @@
     };
   }
 
+  // 当前地图的 id 恒为 "active"（网关 list_maps 里写死的），所以换了地图之后
+  // 图片 URL 一模一样，浏览器直接给缓存 —— 现场表现为"切了地图导航页还是旧图，
+  // 硬刷新才更新"。用 mtime 当版本号把缓存打掉。
+  function mapImageUrl(mapId, mtime) {
+    const v = mtime ? `?v=${Math.round(mtime * 1000)}` : "";
+    return `${state.baseUrl}/api/maps/${encodeURIComponent(mapId)}/image${v}`;
+  }
+
   async function pickActiveMapGeometry() {
     const maps = await api("/api/maps");
     const active = maps.find((m) => m.is_active) || maps[0];
     if (!active) return null;
     const info = await api(`/api/maps/${encodeURIComponent(active.id)}`);
-    return { mapId: active.id, geometry: info.geometry };
+    return {
+      mapId: active.id,
+      geometry: info.geometry,
+      mtime: active.mtime || null,
+      label: active.base_name || active.label || "",
+    };
   }
 
   // ── 导航 ──
@@ -1604,7 +1617,7 @@
     }
     navUi.geo = active.geometry;
     navUi.view = await mountMapView(el, {
-      imageUrl: `${state.baseUrl}/api/maps/${encodeURIComponent(active.mapId)}/image`,
+      imageUrl: mapImageUrl(active.mapId, active.mtime),
       geo: active.geometry,
       waypoints: navUi.waypoints,
       onPlace,
@@ -1644,10 +1657,31 @@
     pullScan();
     const scanTimer = setInterval(pullScan, 500);
 
+    // 地图热切换：在别的页面「设为当前」之后回到导航页，或者两个浏览器
+    // 各开一个页面，都不该还盯着旧图。3 秒一次，只在 mtime 变了才换。
+    let mapMtime = active.mtime;
+    let mapBusy = false;
+    const pullMap = async () => {
+      if (mapBusy || !navUi.view) return;
+      mapBusy = true;
+      try {
+        const cur = await pickActiveMapGeometry();
+        if (cur && navUi.view && cur.mtime && cur.mtime !== mapMtime) {
+          mapMtime = cur.mtime;
+          navUi.geo = cur.geometry;
+          navUi.view.setImage(mapImageUrl(cur.mapId, cur.mtime), cur.geometry);
+          toast(`地图已切换为 ${cur.label}`, "success");
+        }
+      } catch (_e) { /* 网络抖动，下一轮再说 */ }
+      finally { mapBusy = false; }
+    };
+    const mapTimer = setInterval(pullMap, 3000);
+
     onPageLeave(() => {
       clearInterval(markTimer);
       clearInterval(planTimer);
       clearInterval(scanTimer);
+      clearInterval(mapTimer);
       if (navUi.view && navUi.view.destroy) navUi.view.destroy();
       navUi.view = null;
     });
@@ -1745,13 +1779,19 @@
     return NAV_STATUS_TEXT[String(status).toLowerCase()] || String(status);
   }
 
+  // 停下来之后，机器人到目标点的直线距离。位姿或目标缺一不可。
+  function poseToTargetDistance(pose, target) {
+    if (!pose || !target || target.x == null || pose.x == null) return null;
+    return Math.hypot(pose.x - target.x, pose.y - target.y);
+  }
+
   function navHeadlineHtml() {
     const s = state.status || {};
     const nv = s.navigate || {};
     const patrol = s.patrol || {};
     const navm = s.navigation_manager || {};
     const pose = s.pose;
-    let title, sub, tone = "", ratio = null;
+    let title, sub, tone = "", ratio = null, finalOffset = null;
 
     if (patrol.running) {
       title = `巡航中 ${patrol.index}/${patrol.total}`;
@@ -1776,7 +1816,13 @@
         ? !!nv.result_success
         : String(nv.result_status).toLowerCase() === "success";
       title = done ? (ok ? "已到达" : `未完成 · ${navStatusText(nv.result_status)}`) : "空闲";
+      // 「已到达」不等于站在目标点上：g1_control_server 是按档位容差判到位的
+      // （日志里的 "物理距离达标 (Dist: 0.26m)"，精准档容差 0.62m），
+      // 到点后主动取消 Nav2。之前界面既说已到达又说剩余 0.00 m，
+      // 把这个真实存在的偏差抹掉了，现场对不上就会怀疑定位有问题。
+      finalOffset = done && ok ? poseToTargetDistance(pose, nv.target) : null;
       sub = nv.result_message || (navm.ready ? "长按地图放置目标点" : "导航栈未就绪，先在下方开启");
+      if (finalOffset != null) sub = `${sub}（实际停在距目标 ${finalOffset.toFixed(2)} m 处）`;
       tone = done ? (ok ? "ok" : "crit") : "";
     }
 
@@ -1784,7 +1830,9 @@
       ["导航栈", navm.state || "—", navm.ready ? "is-ok" : "is-warn"],
       ["位姿", pose ? `${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}` : "无 TF", pose ? "" : "is-dim"],
       ["朝向", pose ? `${pose.yaw_deg.toFixed(0)}°` : "—", pose ? "" : "is-dim"],
-      ["剩余", nv.distance_to_goal != null ? `${nv.distance_to_goal.toFixed(2)} m` : "—", ""],
+      finalOffset != null
+        ? ["实际偏差", `${finalOffset.toFixed(2)} m`, ""]
+        : ["剩余", nv.distance_to_goal != null ? `${nv.distance_to_goal.toFixed(2)} m` : "—", ""],
       ["用时", nv.elapsed_sec != null ? `${nv.elapsed_sec} s` : "—", ""],
     ];
 
@@ -1825,7 +1873,7 @@
           <div class="pane-head"><div class="eyebrow">导航状态</div><span class="hint">每 1.5 秒刷新</span></div>
           <div class="pane-body" data-live="nav-panel">${navHeadlineHtml()}</div>
         </section>
-        <section class="pane">
+        <section class="pane fixed">
           <div class="pane-head"><div class="eyebrow">目标</div><span class="hint" id="pt-src">尚未设定</span></div>
           <div class="pane-body scroll">
             ${coordFieldsHtml("pt", "目标")}
@@ -1888,7 +1936,7 @@
           <div class="pane-head"><div class="eyebrow">当前定位</div><span class="hint">每 1.5 秒刷新</span></div>
           <div class="pane-body" data-live="nav-panel">${navHeadlineHtml()}</div>
         </section>
-        <section class="pane">
+        <section class="pane fixed">
           <div class="pane-head"><div class="eyebrow">重定位</div></div>
           <div class="pane-body scroll">
             <p class="note" style="margin-top:0">

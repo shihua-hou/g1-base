@@ -247,7 +247,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
    否则它一大就把下面的操作面板压成一条缝；底部的操作面板不封顶，
    保证按钮永远显示完整。 */
 .stack > .pane.fixed { flex: 0 1 auto; min-height: 0; }
-.stack > .pane.fixed:first-child { max-height: 45%; }
+.stack > .pane.fixed:first-child { max-height: 52%; }
 .stack > .pane.fixed > .pane-body { overflow-y: auto; overscroll-behavior: contain; }
 
 /* ══ 首页左栏：系统运行状态（重做） ══ */
@@ -496,8 +496,10 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 .headline.tone-ok .headline-main { color: var(--ok); }
 .headline.tone-crit .headline-main { color: var(--crit); }
 .headline-sub {
-  font-size: var(--fs-xs); color: var(--ink-3); margin-top: 2px;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: var(--fs-xs); color: var(--ink-3); margin-top: 3px;
+  /* 两行封顶：附上实际偏差之后一行装不下，但也不能让它无限撑高 */
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .progress {
   height: 5px; border-radius: 3px; background: var(--line-soft);
@@ -509,8 +511,14 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   transition: width .5s ease;
 }
 
-/* 次要指标压成一行小卡片，不再占满整块 */
-.chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+/* 次要指标压成小卡片。用 auto-fit 网格而不是 flex-wrap：
+   五个 chip 宽度各不相同，flex 换行后每行末尾参差不齐，看着很挤；
+   网格让它们自动对齐成整齐的两三列，行列都对得上。 */
+.chip-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 6px;
+}
 .chip {
   display: flex; align-items: baseline; gap: 5px;
   background: var(--well);
