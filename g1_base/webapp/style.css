@@ -1008,3 +1008,23 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   border-color: var(--warn);
   color: var(--warn);
 }
+
+/* 按钮忙碌态：禁用 + 转圈 + 换文案。
+   .btn:disabled 本身是 opacity .4，忙碌时压得太淡反而看不清文案，
+   这里提回 .75 —— 正在干活要比"不可点"更显眼。 */
+.btn.is-busy { opacity: .75; cursor: progress; }
+.btn-spin {
+  display: inline-block;
+  width: 11px; height: 11px;
+  margin-right: 7px;
+  vertical-align: -1px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin .7s linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+/* 尊重系统的"减少动态效果"设置：不转，但保留一个静态环表明在忙 */
+@media (prefers-reduced-motion: reduce) {
+  .btn-spin { animation: none; border-top-color: currentColor; opacity: .5; }
+}

@@ -41,6 +41,42 @@
     setTimeout(() => el.remove(), 3200);
   }
 
+  // 耗时操作的按钮忙碌态：禁用 + 换文案 + 转圈。
+  //
+  // 之前所有按钮都是"点下去毫无变化，十几秒后突然弹个 toast"——「开启导航栈」
+  // 要跑完定位和 Nav2 拉起，实测 15 秒，这期间界面上完全看不出在干活，
+  // 现场只能反复点。文案要写清楚正在做什么，光转圈还是不知道在等什么。
+  async function withBusy(el, busyLabel, fn) {
+    if (!el) return fn();
+    const oldHtml = el.innerHTML;
+    const oldDisabled = el.disabled;
+    el.disabled = true;
+    el.classList.add("is-busy");
+    el.innerHTML = `<span class="btn-spin"></span>${escapeHtml(busyLabel)}`;
+    try {
+      return await fn();
+    } finally {
+      // 按钮可能已经被重绘掉了（比如成功后跳页），那就什么都不用还原
+      if (el.isConnected) {
+        el.classList.remove("is-busy");
+        el.innerHTML = oldHtml;
+        el.disabled = oldDisabled;
+      }
+    }
+  }
+
+  // 常用组合：忙碌态 + 统一的成功/失败 toast
+  function bindBusy(id, busyLabel, fn, okMsg) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("click", async () => {
+      if (el.disabled) return;
+      try {
+        await withBusy(el, busyLabel, () => guarded(fn, okMsg));
+      } catch (_e) { /* toast 里已经报过 */ }
+    });
+  }
+
   async function guarded(fn, okMsg) {
     try {
       const result = await fn();
@@ -1524,7 +1560,10 @@
     if (on) on.addEventListener("click", async () => {
       optimistic("STARTING_LOCALIZATION");
       try {
-        await guarded(() => api("/api/nav/ensure_ready", { method: "POST" }), "已请求开启导航");
+        // 这一步要等雷达起转、IMU 静止闸门、Super-LIO 载图、Nav2 全部 activate，
+        // 十几秒起步。不写清楚在等什么，现场只会以为卡死了反复点。
+        await withBusy(on, "启动定位与 Nav2…", () =>
+          guarded(() => api("/api/nav/ensure_ready", { method: "POST" }), "导航栈已就绪"));
       } catch (_e) { /* toast 里已经报过了 */ }
       syncNavStackButtons();
     });
@@ -1533,7 +1572,8 @@
       if (!confirm("关闭导航会停掉定位与 Nav2，确认？")) return;
       optimistic("STOPPED");
       try {
-        await guarded(() => api("/api/nav/stop_all", { method: "POST" }), "已关闭导航");
+        await withBusy(off, "停止中…", () =>
+          guarded(() => api("/api/nav/stop_all", { method: "POST" }), "已关闭导航"));
       } catch (_e) { /* 同上 */ }
       syncNavStackButtons();
     });
@@ -1692,6 +1732,19 @@
     return Math.max(0, Math.min(1, 1 - d / navUi.progressBase));
   }
 
+  // 后端状态词 -> 人话。词表见 g1_control_server.py:37-39
+  const NAV_STATUS_TEXT = {
+    success: "成功",
+    error: "失败",
+    canceled: "已取消",
+    timeout: "超时",
+    rejected: "被拒绝",
+  };
+  function navStatusText(status) {
+    if (!status) return "";
+    return NAV_STATUS_TEXT[String(status).toLowerCase()] || String(status);
+  }
+
   function navHeadlineHtml() {
     const s = state.status || {};
     const nv = s.navigate || {};
@@ -1713,10 +1766,18 @@
       ratio = navProgressRatio(nv);
     } else {
       navUi.progressBase = null;
-      const failed = nv.result_status && nv.result_status !== "SUCCEEDED";
-      title = nv.result_status ? (failed ? `未完成 · ${nv.result_status}` : "已到达") : "空闲";
+      // result_success 由服务端判定（g1_control_server.py:346），直接用。
+      // 这里原先拿 result_status !== "SUCCEEDED" 判失败 —— 那是 Nav2 GoalStatus
+      // 的常量，而本系统的词表是小写的 success/error/canceled
+      // （g1_control_server.py:37-39），于是每次成功导航都显示「未完成 · success」。
+      // 老版本网关没有 result_success 字段，退回按词表比对。
+      const done = !!nv.result_status;
+      const ok = nv.result_success != null
+        ? !!nv.result_success
+        : String(nv.result_status).toLowerCase() === "success";
+      title = done ? (ok ? "已到达" : `未完成 · ${navStatusText(nv.result_status)}`) : "空闲";
       sub = nv.result_message || (navm.ready ? "长按地图放置目标点" : "导航栈未就绪，先在下方开启");
-      tone = failed ? "crit" : nv.result_status ? "ok" : "";
+      tone = done ? (ok ? "ok" : "crit") : "";
     }
 
     const chips = [
@@ -1785,22 +1846,23 @@
       refreshMapMarks();
       writeCoord("pt", c);
       document.getElementById("pt-yaw").value = (c.yaw_deg == null ? 0 : c.yaw_deg).toFixed(0);
-      guarded(() => api("/api/nav/navigate", {
-        method: "POST",
-        body: {
-          waypoint_name: "manual", x: c.x, y: c.y,
-          yaw_deg: c.yaw_deg == null ? 0 : c.yaw_deg,
-          align_final_yaw: c.yaw_deg != null,
-        },
-      }), "已发送导航目标");
+      return withBusy(document.getElementById("pt-go"), "下发中…", () =>
+        guarded(() => api("/api/nav/navigate", {
+          method: "POST",
+          body: {
+            waypoint_name: "manual", x: c.x, y: c.y,
+            yaw_deg: c.yaw_deg == null ? 0 : c.yaw_deg,
+            align_final_yaw: c.yaw_deg != null,
+          },
+        }), "已发送导航目标")).catch(() => {});
     };
 
     document.getElementById("pt-go").addEventListener("click", () => {
       const c = readCoord("pt");
       if (c) sendGoal(c);
     });
-    document.getElementById("nav-cancel").addEventListener("click", () =>
-      guarded(() => api("/api/nav/cancel", { method: "POST" }), "已取消导航"));
+    bindBusy("nav-cancel", "停止中…",
+      () => api("/api/nav/cancel", { method: "POST" }), "已取消导航");
 
     await mountNavMap("nav-map", {
       onPlace: (world) => {
@@ -2430,9 +2492,13 @@
         <button class="btn danger" id="btn-stopall">停止全部</button>
       </div>
     `);
-    document.getElementById("btn-ensure").addEventListener("click", () => guarded(() => api("/api/nav/ensure_ready", { method: "POST" }), "已请求"));
-    document.getElementById("btn-restart").addEventListener("click", () => guarded(() => api("/api/nav/restart_all", { method: "POST" }), "已重启"));
-    document.getElementById("btn-stopall").addEventListener("click", () => guarded(() => api("/api/nav/stop_all", { method: "POST" }), "已停止"));
+    bindBusy("btn-ensure", "探测中…",
+             () => api("/api/nav/ensure_ready", { method: "POST" }), "已请求");
+    // 这条最慢：要停掉再重拉定位与 Nav2，现场实测十几秒
+    bindBusy("btn-restart", "重拉定位与 Nav2…",
+             () => api("/api/nav/restart_all", { method: "POST" }), "已重启");
+    bindBusy("btn-stopall", "停止中…",
+             () => api("/api/nav/stop_all", { method: "POST" }), "已停止");
   }
 
   function renderSettingsAbout(active) {

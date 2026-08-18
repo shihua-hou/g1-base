@@ -1041,7 +1041,7 @@ class BridgeNode(Node):
             "active": True, "waypoint_name": waypoint_name, "phase": "sending", "distance_to_goal": None,
             "target": {"x": round(float(x), 3), "y": round(float(y), 3), "yaw_deg": round(math.degrees(float(yaw)), 1)},
             "started_at": time.time(), "finished_at": None,
-            "result_status": "", "result_message": "",
+            "result_status": "", "result_message": "", "result_success": None,
         }
 
         result_holder = {"done": False, "result": None}
@@ -1059,6 +1059,7 @@ class BridgeNode(Node):
                 self._nav_feedback.update({
                     "active": False, "phase": "rejected", "finished_at": time.time(),
                     "result_status": "error", "result_message": "导航目标被拒绝",
+                    "result_success": False,
                 })
                 result_holder["result"] = {"success": False, "status": "error", "message": "导航目标被拒绝"}
                 result_holder["done"] = True
@@ -1071,6 +1072,12 @@ class BridgeNode(Node):
                 self._nav_feedback.update({
                     "active": False, "finished_at": time.time(),
                     "result_status": res.status, "result_message": res.message,
+                    # 服务端已经判过一次（g1_control_server.py:346
+                    # ros_result.success = status == "success"），前端直接用，
+                    # 别再自己拿字符串比对 —— 之前前端拿 "SUCCEEDED" 去比，
+                    # 而这套系统的词表是小写的 success/error/canceled，
+                    # 于是每一次成功的导航都显示成「未完成」。
+                    "result_success": bool(res.success),
                 })
                 result_holder["result"] = {
                     "success": bool(res.success), "status": res.status, "message": res.message,
