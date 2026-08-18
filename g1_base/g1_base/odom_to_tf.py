@@ -15,7 +15,11 @@ from g1_base.common import quaternion_dict_from_yaw, yaw_from_quaternion_msg
 class OdomToTFNode(Node):
     def __init__(self):
         super().__init__("odom_to_tf")
-        self.declare_parameter("input_odom_topic", "/lio/robo/odom")
+        # 用 /lio/odom 而不是 /lio/robo/odom：后者被基础镜像的 DDS 域桥占用着
+        # （它把宇树 MCU 的 /dog_odom 改名发到那个话题），两个发布者原点不同，
+        # 订阅端会拿到交替混合的位姿，map->base_link 会来回跳。
+        # 对 2D 导航两者等价：odom_robo 的 x/y/yaw 都是 0，而这里只取 x/y/yaw。
+        self.declare_parameter("input_odom_topic", "/lio/odom")
         self.declare_parameter("output_odom_topic", "/odom_2d")
         self.declare_parameter("parent_frame", "world")
         self.declare_parameter("child_frame", "base_link")

@@ -1380,9 +1380,19 @@ def activate_map(map_id):
         shutil.copy2(src_yaml, dst_yaml)
     shutil.copy2(src_pgm, dst_pgm)
 
+    # 3D 点云也要跟着切：Nav2 用 pgm 做代价地图，而 Super-LIO 的重定位用 pcd。
+    # 只切 pgm 的话，start_pc2_localization.sh 会按"最新的 *_map.pcd"另挑一张，
+    # 于是定位和规划用的可能是两张不同的地图 —— 表现为机器人以为自己在别处。
+    note = ""
+    src_pcd = src_yaml.parent / f"{entry['base_name']}_map.pcd"
+    if src_pcd.is_file():
+        shutil.copy2(src_pcd, maps_dir / "map.pcd")
+    else:
+        note = "（这张图没有配套的 3D 点云，重定位仍会用上一张，建议重新建图）"
+
     return {
         "success": True,
-        "message": f"已将 {entry['label']} 设为当前地图，需要在「设置」中重启导航栈生效",
+        "message": f"已将 {entry['label']} 设为当前地图，需要在「设置」中重启导航栈生效{note}",
     }
 
 

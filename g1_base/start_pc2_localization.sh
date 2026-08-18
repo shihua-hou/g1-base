@@ -94,8 +94,24 @@ stop_process_group() {
     wait "$pid" 2>/dev/null || true
 }
 
+# 地图目录：优先数据卷，最后才回落到包内的出厂地图。
+# 必须和网关的 resolve_maps_dir() 保持一致 —— 网页上存的图落在数据卷里，
+# 只看包内目录的话重定位会加载到出厂地图，机器人一上来就以为自己在别的场馆。
+resolve_maps_dir() {
+    if [[ -n "${G1_MAPS_DIR:-}" ]]; then
+        echo "$G1_MAPS_DIR"
+    elif [[ -n "${G1_DATA_DIR:-}" ]]; then
+        echo "$G1_DATA_DIR/maps"
+    else
+        echo "$ROOT_DIR/config/maps"
+    fi
+}
+
 resolve_config_map_pcd() {
-    local maps_dir="$ROOT_DIR/config/maps"
+    local maps_dir
+    maps_dir="$(resolve_maps_dir)"
+    # map.pcd 是「设为当前」时同步过来的那张，优先用它，
+    # 保证重定位和 Nav2 的 pgm 指向同一张地图
     local default_map="$maps_dir/map.pcd"
 
     if [[ -f "$default_map" ]]; then

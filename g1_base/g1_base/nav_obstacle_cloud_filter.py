@@ -33,7 +33,7 @@ class NavObstacleCloudFilter(Node):
         super().__init__("nav_obstacle_cloud_filter")
 
         self.declare_parameter("input_cloud_topic", "/lio/cloud_world")
-        self.declare_parameter("odom_topic", "/lio/robo/odom")
+        self.declare_parameter("odom_topic", "/lio/odom")
         self.declare_parameter("imu_topic", "/livox/imu")
         self.declare_parameter("output_cloud_topic", "/nav/obstacle_cloud")
         self.declare_parameter("output_frame", "world")

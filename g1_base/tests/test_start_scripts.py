@@ -98,10 +98,18 @@ def test_start_navigation_defaults_to_packaged_config_map():
     assert 'MAP_FILE="${MAP_FILE:-$(resolve_default_map_file)}"' in content
 
 
-def test_pc2_localization_reads_relocation_pcd_from_config_maps():
+def test_pc2_localization_resolves_maps_dir_like_the_web_bridge():
+    """重定位的地图目录必须和网关一致，否则会加载到包内的出厂地图。
+
+    网页上存的图落在数据卷（G1_DATA_DIR/maps）里，只看 ROOT_DIR/config/maps
+    的话，机器人一上来就以为自己在别的场馆。
+    """
     content = _read_script("start_pc2_localization.sh")
 
-    assert 'local maps_dir="$ROOT_DIR/config/maps"' in content
+    assert 'if [[ -n "${G1_MAPS_DIR:-}" ]]' in content
+    assert 'echo "$G1_DATA_DIR/maps"' in content
+    assert 'echo "$ROOT_DIR/config/maps"' in content   # 兜底：包内出厂地图
+    assert 'maps_dir="$(resolve_maps_dir)"' in content
     assert 'local default_map="$maps_dir/map.pcd"' in content
     assert "-name '*_map.pcd'" in content
     assert "using relocation PCD" in content

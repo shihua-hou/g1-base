@@ -12,7 +12,11 @@ from launch_ros.substitutions import FindPackageShare
 
 
 FALLBACK_MAP_IMAGE = "exhibit_2d_map.pgm"
-DEFAULT_MID360_HEIGHT_M = "1.3"
+# map->world 的 z 平移。lio.extrinsic.odom_robo 的平移量已经把 LIO 世界原点
+# 放在地面上（super_lio.cpp:155），world.z=0 就是地面，与 map.z=0 重合，
+# 所以这里是 0。若把 odom_robo 的平移改回 0（原点落在雷达上），
+# 这里要相应改成雷达装机高度。
+DEFAULT_MAP_Z_OFFSET_M = "0.0"
 
 
 def _parse_yaml_scalar(value):
@@ -158,7 +162,7 @@ def generate_launch_description():
                     [package_share, "config", "maps", "exhibit_2d_map.yaml"]
                 ),
             ),
-            DeclareLaunchArgument("map_z_offset", default_value=DEFAULT_MID360_HEIGHT_M),
+            DeclareLaunchArgument("map_z_offset", default_value=DEFAULT_MAP_Z_OFFSET_M),
             DeclareLaunchArgument(
                 "nav2_params_file",
                 default_value=PathJoinSubstitution(
@@ -167,7 +171,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("cloud_topic", default_value="/lio/cloud_world"),
             DeclareLaunchArgument("obstacle_cloud_topic", default_value="/nav/obstacle_cloud"),
-            DeclareLaunchArgument("obstacle_odom_topic", default_value="/lio/robo/odom"),
+            DeclareLaunchArgument("obstacle_odom_topic", default_value="/lio/odom"),
             DeclareLaunchArgument("obstacle_cloud_max_range", default_value="3.0"),
             DeclareLaunchArgument("obstacle_cloud_min_height", default_value="0.15"),
             DeclareLaunchArgument("obstacle_cloud_max_height", default_value="1.6"),
@@ -180,11 +184,11 @@ def generate_launch_description():
             DeclareLaunchArgument("scan_range_min", default_value="0.05"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             OpaqueFunction(function=map_server_actions),
-            # Task 5 z contract:
-            # map.z=0 is the floor, world.z=0 is the MID360 startup height.
+            # z contract:
+            # map.z=0 is the floor, and world.z=0 is the floor too (the LIO
+            # world origin sits on the ground, see DEFAULT_MAP_Z_OFFSET_M).
             # nav_obstacle_cloud_filter publishes frame_id=world; STVL/Nav2
-            # transform that cloud through this map->world static TF, using
-            # map_z_offset (MID360 floor height H) as the z translation.
+            # transform that cloud through this map->world static TF.
             # Do not publish world coordinates with a fake map frame label.
             Node(
                 package="tf2_ros",
@@ -265,8 +269,14 @@ def generate_launch_description():
                     {
                         "target_frame": target_frame,
                         "transform_tolerance": 1.0,
-                        "min_height": -1.00,
-                        "max_height": 0.50,
+                        # 相对 base_link，而 odom_to_tf 把 base_link 的 z 置 0、
+                        # world.z=0 又是地面，所以这两个数就是【离地高度】。
+                        # 与 2D 地图的障碍带(0.15~1.6)保持一致。
+                        # 注意：曾经是 -1.00~0.50，那是 world.z=0 还在雷达高度
+                        # 时的等效值(离地 0.3~1.8)，原点移到地面后必须跟着改，
+                        # 否则只剩离地 0.5m 以下，半人高的障碍全看不见。
+                        "min_height": 0.15,
+                        "max_height": 1.60,
                         "angle_min": -3.14159,
                         "angle_max": 3.14159,
                         "angle_increment": 0.0349,

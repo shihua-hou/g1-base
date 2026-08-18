@@ -9,15 +9,19 @@ def _launch_text():
     return (ROOT / "launch" / "navigation.launch.py").read_text(encoding="utf-8")
 
 
-def test_map_z_offset_default_is_mid360_height_placeholder():
+def test_map_z_offset_default_matches_ground_origin_contract():
+    """world 原点已落在地面（odom_robo 平移量所致），map->world 的 z 必须是 0。
+
+    填成雷达高度会把整个代价地图抬高一个雷达高度。
+    """
     text = _launch_text()
-    height_match = re.search(r'DEFAULT_MID360_HEIGHT_M\s*=\s*"([^"]+)"', text)
+    height_match = re.search(r'DEFAULT_MAP_Z_OFFSET_M\s*=\s*"([^"]+)"', text)
     assert height_match is not None
-    assert height_match.group(1) != "0.13"
+    assert float(height_match.group(1)) == 0.0
 
     arg_match = re.search(
         r'DeclareLaunchArgument\(\s*"map_z_offset",\s*'
-        r"default_value=DEFAULT_MID360_HEIGHT_M",
+        r"default_value=DEFAULT_MAP_Z_OFFSET_M",
         text,
     )
     assert arg_match is not None

@@ -1,7 +1,7 @@
 """Runtime gravity alignment monitor for the navigation TF chain.
 
 The monitor compares the gravity-aligned orientation from Madgwick
-(`/imu/data`) with Super-LIO odometry (`/lio/robo/odom`). It only reports
+(`/imu/data`) with Super-LIO odometry (`/lio/odom`). It only reports
 health; it never modifies TF.
 """
 
@@ -171,7 +171,7 @@ class GravityHealthNode(Node):
         super().__init__("gravity_health")
 
         self.declare_parameter("imu_topic", "/imu/data")
-        self.declare_parameter("odom_topic", "/lio/robo/odom")
+        self.declare_parameter("odom_topic", "/lio/odom")
         self.declare_parameter("diagnostics_topic", "/diagnostics")
         self.declare_parameter("detail_topic", "/navigation_manager/detail")
         self.declare_parameter("warning_angle_deg", 3.0)

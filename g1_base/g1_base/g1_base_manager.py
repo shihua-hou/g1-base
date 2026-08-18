@@ -38,7 +38,7 @@ def parse_manager_args(argv=None):
     parser.add_argument("--navigation-timeout", type=float, default=60.0)
     parser.add_argument("--max-bringup-attempts", type=int, default=2)
     parser.add_argument("--pointcloud-topic", default="/lio/cloud_world")
-    parser.add_argument("--relocal-odom-topic", default="/lio/robo/odom")
+    parser.add_argument("--relocal-odom-topic", default="/lio/odom")
     parser.add_argument("--odom-topic", default="/odom_2d")
 
     # Executor args

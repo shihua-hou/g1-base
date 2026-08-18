@@ -515,7 +515,10 @@ NavObstacleCloudFilter::NavObstacleCloudFilter()
 void NavObstacleCloudFilter::declareParameters()
 {
   declare_parameter<std::string>("input_cloud_topic", "/lio/cloud_world");
-  declare_parameter<std::string>("odom_topic", "/lio/robo/odom");
+  // /lio/robo/odom 被 DDS 域桥占用（MCU 的 /dog_odom 改名发在那），换 /lio/odom。
+  // 而且地面法线定向靠 (odom_xyz - centroid).dot(normal)，要求传感器在地面上方，
+  // /lio/robo/odom 的 z 就在地面高度，这个判据会退化。
+  declare_parameter<std::string>("odom_topic", "/lio/odom");
   declare_parameter<std::string>("imu_topic", "/livox/imu");
   declare_parameter<std::string>("output_cloud_topic", "/nav/obstacle_cloud");
   declare_parameter<std::string>("output_frame", "world");

@@ -113,7 +113,7 @@ class PoseViewerNode(Node):
     def get_topic_pose(self):
         for topic_name, msg in (
             ("/odom_2d", self.latest_odom_2d),
-            ("/lio/robo/odom", self.latest_robo_odom),
+            ("/lio/odom", self.latest_robo_odom),
         ):
             if msg is None:
                 continue
@@ -163,7 +163,7 @@ def parse_args():
     parser.add_argument("--frame", default="map")
     parser.add_argument("--base-frame", default="base_link")
     parser.add_argument("--odom-topic", default="/odom_2d")
-    parser.add_argument("--relocal-odom-topic", default="/lio/robo/odom")
+    parser.add_argument("--relocal-odom-topic", default="/lio/odom")
     parser.add_argument("--rate", type=float, default=2.0)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--timeout", type=float, default=5.0)
