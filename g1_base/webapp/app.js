@@ -2403,6 +2403,7 @@
     ["speed", "速度控制", "行走模式 · 线速度"],
     ["network", "网络连接", "网关地址 · 切换设备"],
     ["navstack", "导航栈管理", "就绪 · 重启 · 停止"],
+    ["voice", "语音播报", "音量 · 事件提示"],
     ["about", "关于", "版本 · 显示信息"],
   ];
 
@@ -2435,6 +2436,7 @@
     if (active === "speed") return renderSettingsSpeed(active);
     if (active === "network") return renderSettingsNetwork(active);
     if (active === "navstack") return renderSettingsNavStack(active);
+    if (active === "voice") return renderSettingsVoice(active);
     if (active === "about") return renderSettingsAbout(active);
     return renderSettingsLogs(active);
   }
@@ -2503,6 +2505,96 @@
       method: "PUT",
       body: { mode: document.getElementById("mode-select").value, linear_speed: parseFloat(document.getElementById("speed-slider").value) },
     }), "已保存"));
+  }
+
+  // 事件在界面上的排序和说明。key 要和 voice_prompts.yaml 对得上。
+  const VOICE_EVENTS = [
+    ["events", "nav_start",    "开始导航时"],
+    ["events", "nav_arrived",  "到达目标点时"],
+    ["events", "nav_failed",   "导航失败时"],
+    ["events", "patrol_start", "开始巡航时"],
+    ["events", "patrol_done",  "巡航结束时"],
+    ["alerts", "stack_error",  "导航栈异常时"],
+    ["alerts", "estop",        "急停触发时"],
+    ["alerts", "battery_low",  "电量过低时（电量尚未接入，暂不会触发）"],
+  ];
+
+  async function renderSettingsVoice(active) {
+    let prompts = null, vol = null;
+    try { prompts = await api("/api/audio/prompts"); } catch (_e) { /* 用默认渲染 */ }
+    try { vol = await api("/api/audio/volume"); } catch (_e) { /* 音频没起来 */ }
+
+    const volValue = vol && vol.volume != null ? vol.volume : null;
+    const rows = prompts ? VOICE_EVENTS.map(([sec, key, label]) => {
+      const item = (prompts[sec] || {})[key] || {};
+      return `
+        <div class="voice-row">
+          <label class="voice-toggle">
+            <input type="checkbox" data-v-sec="${sec}" data-v-key="${key}" ${item.enabled ? "checked" : ""} />
+            <span>${escapeHtml(label)}</span>
+          </label>
+          <input class="inline-input" type="text" data-v-text="${key}"
+                 value="${escapeHtml(item.text || "")}" placeholder="留空则不播" maxlength="60" />
+        </div>`;
+    }).join("") : `<p class="note">读取播报设置失败，检查网关是否在运行。</p>`;
+
+    settingsShell(active, "语音播报", "改完即时生效", `
+      <div class="pane-body scroll">
+        <div class="field-row">
+          <div class="field" style="flex:1">
+            <label>音量 ${volValue == null ? "（读取失败，音频服务可能未就绪）" : ""}</label>
+            <input id="vol-range" type="range" min="0" max="100" step="5"
+                   value="${volValue == null ? 60 : volValue}" ${volValue == null ? "disabled" : ""} />
+          </div>
+          <div class="field" style="width:5.5em">
+            <label>当前</label>
+            <div class="kv-v" id="vol-view">${volValue == null ? "—" : volValue}</div>
+          </div>
+        </div>
+
+        <label class="voice-toggle" style="margin:10px 0 4px">
+          <input type="checkbox" id="voice-master" ${prompts && prompts.enabled ? "checked" : ""} />
+          <span><b>启用事件播报</b></span>
+        </label>
+        <p class="note" style="margin-top:0">
+          关掉之后机器人只在巡航讲解时说话；下面逐条的开关不受影响，重新打开即恢复。
+        </p>
+
+        <div class="voice-list">${rows}</div>
+      </div>
+      <div class="pane-foot">
+        <button class="btn primary" id="voice-save">保存播报设置</button>
+        <button class="btn" id="voice-test">试听</button>
+      </div>
+    `);
+
+    const volRange = document.getElementById("vol-range");
+    const volView = document.getElementById("vol-view");
+    if (volRange) {
+      // 拖动时只更新显示，松手才下发——每动一格都发一次请求会把服务打满
+      volRange.addEventListener("input", () => { volView.textContent = volRange.value; });
+      volRange.addEventListener("change", async () => {
+        try {
+          const res = await api("/api/audio/volume", { method: "POST", body: { volume: Number(volRange.value) } });
+          if (res && res.volume != null) volView.textContent = res.volume;
+        } catch (err) { toast(String(err.message || err), "error"); }
+      });
+    }
+
+    bindBusy("voice-test", "播报中…",
+             () => api("/api/audio/say", { method: "POST", body: { text: "语音播报测试，当前音量正常" } }),
+             "已发送播报");
+
+    bindBusy("voice-save", "保存中…", async () => {
+      const patch = { enabled: document.getElementById("voice-master").checked, events: {}, alerts: {} };
+      VOICE_EVENTS.forEach(([sec, key]) => {
+        const box = document.querySelector(`[data-v-sec="${sec}"][data-v-key="${key}"]`);
+        const txt = document.querySelector(`[data-v-text="${key}"]`);
+        if (!box || !txt) return;
+        patch[sec][key] = { enabled: box.checked, text: txt.value.trim() };
+      });
+      return api("/api/audio/prompts", { method: "POST", body: patch });
+    }, "播报设置已保存");
   }
 
   function renderSettingsNetwork(active) {

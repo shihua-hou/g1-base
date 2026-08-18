@@ -28,6 +28,8 @@ from g1_base_interfaces.srv import (
     PlayNamedAction,
     RotateRobot,
     RunMovementScript,
+    SetVolume,
+    Speak,
     SetFsmId,
     SquatRobot,
     StopRobot,
@@ -175,6 +177,18 @@ class G1ControlServer(MissionNode):
             GetFsmId,
             "/g1_control/get_fsm_id",
             self._handle_get_fsm_id,
+            callback_group=self._server_group,
+        )
+        self._speak_service = self.create_service(
+            Speak,
+            "/g1_control/speak",
+            self._handle_speak,
+            callback_group=self._server_group,
+        )
+        self._set_volume_service = self.create_service(
+            SetVolume,
+            "/g1_control/set_volume",
+            self._handle_set_volume,
             callback_group=self._server_group,
         )
 
@@ -518,6 +532,48 @@ class G1ControlServer(MissionNode):
                 self._clear_activity()
         _logger.info("execute_arm_action 响应: %s", result)
         return self._fill_service_response(response, result)
+
+    def _handle_speak(self, request, response):
+        text = str(request.text or "").strip()
+        if not text:
+            response.success = False
+            response.status = SERVICE_STATUS_ERROR
+            response.message = "播报内容为空"
+            return response
+        # 不进 _runtime_lock：播报和动作/移动互不冲突，
+        # 而且导航过程中的事件播报正需要能插进来。
+        try:
+            spoken = self.robot_controller.speak(text, int(request.voice_id))
+        except Exception as exc:
+            _logger.error("speak 失败: %s", exc, exc_info=True)
+            response.success = False
+            response.status = SERVICE_STATUS_ERROR
+            response.message = str(exc)
+            return response
+        response.success = bool(spoken)
+        response.status = SERVICE_STATUS_SUCCESS if spoken else SERVICE_STATUS_ERROR
+        response.message = "已播报" if spoken else "音频客户端不可用"
+        return response
+
+    def _handle_set_volume(self, request, response):
+        try:
+            if int(request.volume) < 0:
+                # 负数 = 只查询
+                value = self.robot_controller.get_volume()
+            else:
+                value = self.robot_controller.set_volume(int(request.volume))
+        except Exception as exc:
+            _logger.error("set_volume 失败: %s", exc, exc_info=True)
+            response.success = False
+            response.volume = -1
+            response.status = SERVICE_STATUS_ERROR
+            response.message = str(exc)
+            return response
+        response.success = value is not None
+        response.volume = int(value) if value is not None else -1
+        response.status = SERVICE_STATUS_SUCCESS if value is not None else SERVICE_STATUS_ERROR
+        response.message = "" if value is not None else "音量不可读"
+        return response
 
     def _handle_play_named_action(self, request, response):
         _logger.info("收到 play_named_action 请求: action_name=%s", request.action_name)

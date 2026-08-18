@@ -1,0 +1,9 @@
+# 读写扬声器音量。
+# volume < 0 表示"只查询不设置"，响应里回当前值。
+int32 volume
+---
+bool success
+# 操作之后的实际音量（0-100）；读不到时为 -1
+int32 volume
+string status
+string message

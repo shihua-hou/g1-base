@@ -1,0 +1,48 @@
+# 语音播报设置。会被 start_g1_base.sh 播种到数据卷，现场改动落在卷上。
+#
+# 播报走 Unitree SDK 的 TtsMaker，和巡航讲解共用一个扬声器：
+# 讲解正在播的时候插播事件提示会打断它，所以事件词条都尽量短。
+#
+# cooldown_sec: 同一个事件在这个时间内不重复播，防止状态抖动导致的连珠炮。
+
+enabled: true
+
+events:
+  nav_start:
+    enabled: true
+    text: "开始导航"
+    cooldown_sec: 3
+  nav_arrived:
+    enabled: true
+    text: "已到达"
+    cooldown_sec: 3
+  nav_failed:
+    enabled: true
+    text: "导航失败"
+    cooldown_sec: 5
+  patrol_start:
+    enabled: true
+    text: "开始巡航"
+    cooldown_sec: 5
+  patrol_done:
+    enabled: true
+    text: "巡航结束"
+    cooldown_sec: 5
+
+alerts:
+  stack_error:
+    enabled: true
+    text: "导航系统异常，请检查"
+    # 导航栈掉线可能反复抖动，冷却给长一点
+    cooldown_sec: 60
+  estop:
+    enabled: true
+    text: "急停已触发"
+    cooldown_sec: 10
+  battery_low:
+    enabled: true
+    text: "电量不足，请及时充电"
+    # 低电是持续状态，两分钟提醒一次足够，再密就成骚扰了
+    cooldown_sec: 120
+    # 低于这个百分比才播。电量接入之前这条永远不会触发。
+    threshold_percent: 20

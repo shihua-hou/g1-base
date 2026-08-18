@@ -1859,15 +1859,77 @@ class RobotController:
             pass
         time.sleep(0.5)
 
-    def speak(self, text):
+    def speak(self, text, voice_id=0):
+        """念一段话。返回 True 表示确实交给音频硬件了。
+
+        原来这个函数吞掉所有失败只写日志——巡航讲解那条路径无所谓，
+        但网页上点了「播报」得知道到底响没响，否则只能趴到容器日志里找。
+        """
         if self.audio_client is None:
             self.node.get_logger().info(f"[speech-disabled] {text}")
-            return
+            return False
         try:
             self.node.get_logger().info(f"说: {text}")
-            self.audio_client.TtsMaker(text, 0)
+            self.audio_client.TtsMaker(text, int(voice_id))
+            return True
         except Exception as exc:
             self.node.get_logger().error(f"语音播放失败: {exc}")
+            return False
+
+    # ── 音量：网页上的音量条走这里 ──
+    #
+    # AudioClient.GetVolume() 各版本返回形状不一样：见过 (code, {"volume": 80})、
+    # (code, {"name": "volume", "value": 80})，也见过直接返回数字。
+    # 猜错了界面上就是个假数字，所以这里逐层剥，剥不出来就老实回 None。
+    @staticmethod
+    def _parse_volume(raw):
+        if raw is None:
+            return None
+        if isinstance(raw, (int, float)):
+            return int(raw)
+        if isinstance(raw, (tuple, list)):
+            # (code, data) 形式：code 非 0 表示失败
+            if len(raw) == 2 and isinstance(raw[0], int):
+                if raw[0] != 0:
+                    return None
+                return RobotController._parse_volume(raw[1])
+            for item in raw:
+                got = RobotController._parse_volume(item)
+                if got is not None:
+                    return got
+            return None
+        if isinstance(raw, dict):
+            for key in ("volume", "value", "Volume", "Value"):
+                if key in raw:
+                    return RobotController._parse_volume(raw[key])
+            return None
+        if isinstance(raw, str):
+            try:
+                return int(float(raw.strip()))
+            except ValueError:
+                return None
+        return None
+
+    def get_volume(self):
+        """返回 0-100 的音量；音频不可用或读不出来返回 None。"""
+        if self.audio_client is None:
+            return None
+        try:
+            value = self._parse_volume(self.audio_client.GetVolume())
+        except Exception as exc:
+            self.node.get_logger().warning(f"读取音量失败: {exc}")
+            return None
+        if value is None:
+            return None
+        return max(0, min(100, int(value)))
+
+    def set_volume(self, volume):
+        """设置音量，返回设置后实际读回的值（读不回就返回请求值）。"""
+        if self.audio_client is None:
+            raise RuntimeError("音频客户端不可用")
+        target = max(0, min(100, int(volume)))
+        self.audio_client.SetVolume(target)
+        return self.get_volume() if self.get_volume() is not None else target
 
     def perform_interaction(self, text, action_id):
         self.node.get_logger().info(f"执行交互: action_id={action_id}")

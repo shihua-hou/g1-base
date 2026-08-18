@@ -17,6 +17,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SquatRobot.srv"
   "srv/StopRobot.srv"
   "srv/SetFsmId.srv"
+  "srv/Speak.srv"
+  "srv/SetVolume.srv"
   "srv/GetFsmId.srv"
   DEPENDENCIES geometry_msgs
 )

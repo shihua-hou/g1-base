@@ -1036,3 +1036,21 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 @media (prefers-reduced-motion: reduce) {
   .btn-spin { animation: none; border-top-color: currentColor; opacity: .5; }
 }
+
+/* 语音播报设置：开关 + 文案一行，行数多时靠 gap 撑开可读性 */
+.voice-list { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.voice-row {
+  display: grid;
+  grid-template-columns: minmax(9em, 1fr) minmax(8em, 1.2fr);
+  gap: 8px; align-items: center;
+}
+.voice-toggle {
+  display: flex; align-items: center; gap: 7px;
+  font-size: var(--fs-xs); color: var(--ink-2); cursor: pointer; min-width: 0;
+}
+.voice-toggle input { flex-shrink: 0; }
+.voice-toggle span { overflow: hidden; text-overflow: ellipsis; }
+/* 窄屏一行放不下开关和文案，堆成两行 */
+@media (max-width: 720px) {
+  .voice-row { grid-template-columns: 1fr; gap: 4px; }
+}

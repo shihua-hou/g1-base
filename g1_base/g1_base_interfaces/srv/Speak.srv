@@ -1,0 +1,8 @@
+# 让机器人念一段话。走 Unitree SDK 的 AudioClient.TtsMaker。
+string text
+# 音色编号，SDK 默认 0。不确定就填 0。
+uint8 voice_id
+---
+bool success
+string status
+string message

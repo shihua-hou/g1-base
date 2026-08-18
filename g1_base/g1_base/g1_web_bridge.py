@@ -12,6 +12,7 @@ iPad 端浏览器打开 http://<机器人IP>:8081/ 即可。
 """
 
 import argparse
+import copy
 import json
 import math
 import sys
@@ -75,6 +76,8 @@ from g1_base_interfaces.srv import (
     MoveRobot,
     PlayNamedAction,
     Relocalize,
+    SetVolume,
+    Speak,
     RotateRobot,
     RunMovementScript,
     SetFsmId,
@@ -698,6 +701,14 @@ class BridgeNode(Node):
         self.cli_squat = self.create_client(SquatRobot, "/g1_control/squat_robot", callback_group=self._group)
         self.cli_set_fsm = self.create_client(SetFsmId, "/g1_control/set_fsm_id", callback_group=self._group)
         self.cli_get_fsm = self.create_client(GetFsmId, "/g1_control/get_fsm_id", callback_group=self._group)
+        self.cli_speak = self.create_client(Speak, "/g1_control/speak", callback_group=self._group)
+        self.cli_set_volume = self.create_client(SetVolume, "/g1_control/set_volume", callback_group=self._group)
+
+        # ── 事件播报 ──
+        # 1Hz 比对状态快照。播报本身走 _announce，失败只记日志，
+        # 绝不让音频问题拖垮状态轮询。
+        self.voice = VoiceAnnouncer(self, self._announce)
+        self.create_timer(1.0, self._voice_tick, callback_group=self._group)
         self.act_navigate = ActionClient(self, NavigateToTarget, "/g1_control/navigate_to_target", callback_group=self._group)
 
         # ── navigation_manager 客户端 ──
@@ -996,6 +1007,43 @@ class BridgeNode(Node):
         }
 
     # ── 通用同步调用助手 ──
+    # ── 语音播报 ──
+
+    def speak(self, text, voice_id=0, timeout=6.0):
+        req = Speak.Request()
+        req.text = str(text)[:200]
+        req.voice_id = int(voice_id)
+        resp = self.call_service(self.cli_speak, req, timeout=timeout, name="speak")
+        return self.response_to_dict(resp)
+
+    def audio_volume(self, volume=None, timeout=6.0):
+        req = SetVolume.Request()
+        # 负数约定为"只查询"
+        req.volume = -1 if volume is None else int(volume)
+        resp = self.call_service(self.cli_set_volume, req, timeout=timeout, name="set_volume")
+        out = self.response_to_dict(resp)
+        vol = int(getattr(resp, "volume", -1))
+        out["volume"] = vol if vol >= 0 else None
+        return out
+
+    def _announce(self, text):
+        """播报专用的发声通道：失败只记日志，绝不把异常抛回状态循环。
+
+        播报是锦上添花，音频服务没起来不该拖垮状态轮询。
+        """
+        try:
+            self.speak(text, timeout=3.0)
+            return True
+        except Exception as exc:
+            self.get_logger().warning(f"[voice] 播报失败: {text} -> {exc}")
+            return False
+
+    def _voice_tick(self):
+        try:
+            self.voice.tick(self.snapshot_status())
+        except Exception as exc:
+            self.get_logger().warning(f"[voice] 播报检查异常: {exc}")
+
     def call_service(self, client, request, timeout=8.0, name=""):
         if not client.wait_for_service(timeout_sec=2.0):
             raise ApiError(f"服务不可用: {name or client.srv_name}", 503)
@@ -1342,6 +1390,84 @@ def clear_lio_pcd():
 
 def routes_dir():
     return data_dir("routes")
+
+
+def voice_prompts_file():
+    return data_dir("voice_prompts.yaml")
+
+
+# 播种失败或文件被删时的兜底，保证播报功能不因为缺文件就整个失效
+DEFAULT_VOICE_PROMPTS = {
+    "enabled": True,
+    "events": {
+        "nav_start":    {"enabled": True, "text": "开始导航",   "cooldown_sec": 3},
+        "nav_arrived":  {"enabled": True, "text": "已到达",     "cooldown_sec": 3},
+        "nav_failed":   {"enabled": True, "text": "导航失败",   "cooldown_sec": 5},
+        "patrol_start": {"enabled": True, "text": "开始巡航",   "cooldown_sec": 5},
+        "patrol_done":  {"enabled": True, "text": "巡航结束",   "cooldown_sec": 5},
+    },
+    "alerts": {
+        "stack_error":  {"enabled": True, "text": "导航系统异常，请检查", "cooldown_sec": 60},
+        "estop":        {"enabled": True, "text": "急停已触发",           "cooldown_sec": 10},
+        "battery_low":  {"enabled": True, "text": "电量不足，请及时充电",
+                         "cooldown_sec": 120, "threshold_percent": 20},
+    },
+}
+
+
+def get_voice_prompts():
+    path = voice_prompts_file()
+    if not path.is_file() or yaml is None:
+        return copy.deepcopy(DEFAULT_VOICE_PROMPTS)
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return copy.deepcopy(DEFAULT_VOICE_PROMPTS)
+    # 与默认值合并：现场文件缺了某个事件时用默认补上，
+    # 而不是让那个事件静默失踪
+    merged = copy.deepcopy(DEFAULT_VOICE_PROMPTS)
+    if isinstance(data.get("enabled"), bool):
+        merged["enabled"] = data["enabled"]
+    for section in ("events", "alerts"):
+        incoming = data.get(section) or {}
+        if not isinstance(incoming, dict):
+            continue
+        for key, item in incoming.items():
+            if not isinstance(item, dict):
+                continue
+            merged[section].setdefault(key, {}).update(item)
+    return merged
+
+
+def set_voice_prompts(patch):
+    """局部更新：只覆盖传进来的字段，其余保持不变。"""
+    if yaml is None:
+        raise ApiError("服务器缺少 pyyaml，无法修改设置", 500)
+    data = get_voice_prompts()
+    if isinstance(patch.get("enabled"), bool):
+        data["enabled"] = patch["enabled"]
+    for section in ("events", "alerts"):
+        incoming = patch.get(section) or {}
+        if not isinstance(incoming, dict):
+            continue
+        for key, item in incoming.items():
+            if key not in data[section] or not isinstance(item, dict):
+                continue
+            slot = data[section][key]
+            if isinstance(item.get("enabled"), bool):
+                slot["enabled"] = item["enabled"]
+            if isinstance(item.get("text"), str) and item["text"].strip():
+                slot["text"] = item["text"].strip()[:120]
+            for num_key, lo, hi in (("cooldown_sec", 0, 3600), ("threshold_percent", 0, 100)):
+                if num_key in item and num_key in slot:
+                    try:
+                        slot[num_key] = max(lo, min(hi, int(item[num_key])))
+                    except (TypeError, ValueError):
+                        pass
+    path = voice_prompts_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    return data
 
 
 def walking_mode_file():
@@ -1748,6 +1874,101 @@ def list_movement_scripts():
     return sorted(p.name for p in sdir.glob("*.json"))
 
 
+class VoiceAnnouncer:
+    """按状态变化自动播报。
+
+    实现方式是周期比对快照，而不是在导航/巡航的各个调用点插钩子：
+    钩子要散落在十几处，漏一处就少一条播报，重复注册又会连播两遍；
+    比对快照只有这一处逻辑，新增事件也只是多一条 if。
+
+    代价是最长有一个 tick 的延迟（1 秒），对语音提示完全够用。
+    """
+
+    def __init__(self, node, say):
+        self._node = node
+        self._say = say                 # 注入，方便测试时换成假的
+        self._last_said = {}            # key -> 上次播报时刻，用于冷却
+        self._prev = {}                 # 上一拍的关键状态，用于识别"变化"
+
+    def _fire(self, cfg_section, key, cfg):
+        item = (cfg.get(cfg_section) or {}).get(key) or {}
+        if not item.get("enabled", True):
+            return
+        text = str(item.get("text") or "").strip()
+        if not text:
+            return
+        cooldown = float(item.get("cooldown_sec", 0) or 0)
+        now = time.time()
+        if now - self._last_said.get(key, 0.0) < cooldown:
+            return
+        self._last_said[key] = now
+        self._say(text)
+
+    def tick(self, status):
+        try:
+            cfg = get_voice_prompts()
+        except Exception:
+            return
+        if not cfg.get("enabled", True):
+            # 关掉播报时把上一拍状态也清掉，避免重新打开时补播一堆陈年事件
+            self._prev = {}
+            return
+
+        nv = status.get("navigate") or {}
+        patrol = status.get("patrol") or {}
+        navm = status.get("navigation_manager") or {}
+        control = status.get("control") or {}
+        system = status.get("system") or {}
+        prev = self._prev
+
+        # 导航：只在"从没在跑变成在跑"和"跑完那一拍"触发
+        nav_active = bool(nv.get("active"))
+        if nav_active and not prev.get("nav_active"):
+            self._fire("events", "nav_start", cfg)
+        if not nav_active and prev.get("nav_active"):
+            if nv.get("result_success"):
+                self._fire("events", "nav_arrived", cfg)
+            elif nv.get("result_status"):
+                self._fire("events", "nav_failed", cfg)
+
+        # 巡航
+        patrol_running = bool(patrol.get("running"))
+        if patrol_running and not prev.get("patrol_running"):
+            self._fire("events", "patrol_start", cfg)
+        if not patrol_running and prev.get("patrol_running"):
+            self._fire("events", "patrol_done", cfg)
+
+        # 告警：导航栈进入 ERROR
+        state = navm.get("state") or ""
+        if state == "ERROR" and prev.get("nav_state") != "ERROR":
+            self._fire("alerts", "stack_error", cfg)
+
+        # 告警：急停锁上
+        stop_latched = bool(control.get("stop_latched"))
+        if stop_latched and not prev.get("stop_latched"):
+            self._fire("alerts", "estop", cfg)
+
+        # 告警：低电。电量未接入时 battery_percent 为 None，这条永远不触发。
+        battery = system.get("battery_percent")
+        if battery is not None:
+            threshold = ((cfg.get("alerts") or {}).get("battery_low") or {}).get("threshold_percent", 20)
+            try:
+                low = float(battery) <= float(threshold)
+            except (TypeError, ValueError):
+                low = False
+            # 低电是持续状态，不能只在跨越阈值那一拍播——万一那一拍漏了就再也不提醒。
+            # 靠 cooldown 控制频率，所以这里每拍都试。
+            if low:
+                self._fire("alerts", "battery_low", cfg)
+
+        self._prev = {
+            "nav_active": nav_active,
+            "patrol_running": patrol_running,
+            "nav_state": state,
+            "stop_latched": stop_latched,
+        }
+
+
 # ── 设置：速度 / 走路模式 ──
 
 def get_walking_mode_settings():
@@ -2037,6 +2258,28 @@ def make_handler(node: BridgeNode):
                 return self._send_json(node.plan_snapshot())
             if method == "GET" and path == "/api/nav/scan":
                 return self._send_json(node.scan_snapshot())
+
+            # ── 语音 ──
+            if method == "POST" and path == "/api/audio/say":
+                text = str((body or {}).get("text", "")).strip()
+                if not text:
+                    raise ApiError("播报内容不能为空", 400)
+                return self._send_json(node.speak(text))
+            if method == "GET" and path == "/api/audio/volume":
+                return self._send_json(node.audio_volume(None))
+            if method == "POST" and path == "/api/audio/volume":
+                raw = (body or {}).get("volume")
+                try:
+                    vol = int(raw)
+                except (TypeError, ValueError):
+                    raise ApiError("volume 需要 0-100 的整数", 400)
+                if not 0 <= vol <= 100:
+                    raise ApiError("volume 需要 0-100 的整数", 400)
+                return self._send_json(node.audio_volume(vol))
+            if method == "GET" and path == "/api/audio/prompts":
+                return self._send_json(get_voice_prompts())
+            if method == "POST" and path == "/api/audio/prompts":
+                return self._send_json({"success": True, "prompts": set_voice_prompts(body or {})})
             if method == "POST" and path == "/api/nav/cancel":
                 return self._send_json(node.cancel_navigate())
 

@@ -30,9 +30,11 @@ seed_data() {
             cp -rL "${G1_SHARE}/config/${item}" "${G1_DATA_DIR}/${item}"
         fi
     done
-    if [[ ! -e "${G1_DATA_DIR}/walking_mode.yaml" && -e "${G1_SHARE}/config/walking_mode.yaml" ]]; then
-        cp -L "${G1_SHARE}/config/walking_mode.yaml" "${G1_DATA_DIR}/walking_mode.yaml"
-    fi
+    for f in walking_mode.yaml voice_prompts.yaml; do
+        if [[ ! -e "${G1_DATA_DIR}/${f}" && -e "${G1_SHARE}/config/${f}" ]]; then
+            cp -L "${G1_SHARE}/config/${f}" "${G1_DATA_DIR}/${f}"
+        fi
+    done
 }
 
 # ── Super-LIO 存图目录改指到数据卷 ──
