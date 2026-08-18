@@ -86,6 +86,9 @@
       const renderer = LIVE_RENDERERS[el.getAttribute("data-live")];
       if (renderer) el.innerHTML = renderer();
     });
+    // 导航栈那两个按钮不在 data-live 片段里（重绘会打断 details 折叠和焦点），
+    // 只改 disabled，所以单独在这里跟着状态一起刷。不在当前页面时自己返回。
+    syncNavStackButtons();
   }
 
   const LIVE_RENDERERS = {
@@ -1428,15 +1431,87 @@
     return renderNavPoint(opts);
   }
 
+  // 栈正在起落的中间态：两个按钮都锁上，等它落定
+  const NAV_STACK_BUSY = new Set(["STARTING_LOCALIZATION", "STARTING_NAVIGATION", "RECOVERING"]);
+  // 栈是停的：只能开
+  const NAV_STACK_DOWN = new Set(["STOPPED", "ERROR"]);
+
+  // 两个按钮的可用性完全由 navigation_manager 的状态机决定，每次状态轮询重算。
+  // 之前两个按钮永远可点，栈已经起来了还能再点「开启」、正在启动时也能点，
+  // 现场只能靠看日志才知道点没点上 —— 这正是「点了没反应」的由来。
+  function syncNavStackButtons() {
+    const on = document.getElementById("nav-stack-on");
+    const off = document.getElementById("nav-stack-off");
+    if (!on && !off) return;                           // 当前页面没有这组按钮
+
+    const navm = (state.status && state.status.navigation_manager) || {};
+    const st = navm.state || "";
+    const busy = NAV_STACK_BUSY.has(st);
+    const down = NAV_STACK_DOWN.has(st);
+    const mapping = st === "MAPPING" || navm.mode === "mapping";
+
+    let canOn, canOff, hint;
+    if (!st) {
+      canOn = false; canOff = false;
+      hint = "读取导航栈状态…";
+    } else if (mapping) {
+      canOn = false; canOff = false;
+      hint = "建图中：导航栈开关不可用，请先在建图页停止建图。";
+    } else if (busy) {
+      canOn = false; canOff = false;
+      hint = "导航栈启动中，请稍候…";
+    } else if (down) {
+      canOn = true; canOff = false;                    // 已经是停的，没什么好关
+      hint = st === "ERROR"
+        ? "上次启动失败，可重新点「开启导航栈」重试；反复失败请看容器日志。"
+        : "导航栈已停止。点「开启导航栈」拉起定位与 Nav2。";
+    } else if (navm.ready) {
+      canOn = false; canOff = true;                    // 已就绪，别再重复点开启
+      hint = "导航栈已就绪。关闭会停掉定位与 Nav2，仅在排障或收工时使用。";
+    } else {
+      canOn = true; canOff = true;                     // DEGRADED_*：可重试也可停
+      hint = "导航栈未完全就绪，可再点「开启导航栈」重试，或关闭后重来。";
+    }
+
+    if (on) on.disabled = !canOn;
+    if (off) off.disabled = !canOff;
+    const el = document.getElementById("nav-stack-hint");
+    if (el) el.textContent = hint;
+  }
+
   // 导航栈开关：这两个按钮管的是底层栈起没起，跟单次目标的下发/取消是两件事
   function bindNavStackButtons() {
     const on = document.getElementById("nav-stack-on");
     const off = document.getElementById("nav-stack-off");
-    if (on) on.addEventListener("click", () => guarded(() => api("/api/nav/ensure_ready", { method: "POST" }), "已请求开启导航"));
-    if (off) off.addEventListener("click", () => {
-      if (!confirm("关闭导航会停掉定位与 Nav2，确认？")) return;
-      guarded(() => api("/api/nav/stop_all", { method: "POST" }), "已关闭导航");
+
+    // 点完先按预期把状态翻过去，别等 1.5 秒后的轮询 —— 中间那一下没反馈，
+    // 现场会以为没点上又点一次。轮询到真状态后会自动校正。
+    const optimistic = (nextState) => {
+      const navm = (state.status && state.status.navigation_manager) || {};
+      navm.state = nextState;
+      navm.ready = false;
+      if (state.status) state.status.navigation_manager = navm;
+      syncNavStackButtons();
+    };
+
+    if (on) on.addEventListener("click", async () => {
+      optimistic("STARTING_LOCALIZATION");
+      try {
+        await guarded(() => api("/api/nav/ensure_ready", { method: "POST" }), "已请求开启导航");
+      } catch (_e) { /* toast 里已经报过了 */ }
+      syncNavStackButtons();
     });
+
+    if (off) off.addEventListener("click", async () => {
+      if (!confirm("关闭导航会停掉定位与 Nav2，确认？")) return;
+      optimistic("STOPPED");
+      try {
+        await guarded(() => api("/api/nav/stop_all", { method: "POST" }), "已关闭导航");
+      } catch (_e) { /* 同上 */ }
+      syncNavStackButtons();
+    });
+
+    syncNavStackButtons();
   }
 
   // 地图上的标记：机器人当前位姿（带朝向扇形）+ 目标点 + 重定位点。
@@ -1623,7 +1698,7 @@
             <button class="btn success" id="nav-stack-on">开启导航栈</button>
             <button class="btn danger" id="nav-stack-off">关闭导航栈</button>
           </div>
-          <p class="note">关闭会停掉定位与 Nav2，机器人将无法导航；仅在排障或收工时使用。</p>
+          <p class="note" id="nav-stack-hint">关闭会停掉定位与 Nav2，机器人将无法导航；仅在排障或收工时使用。</p>
         </div>
       </details>`;
   }
