@@ -85,7 +85,10 @@ RUN set -exo pipefail; \
     rm -rf /root/g1_ws/build /root/g1_ws/log
 
 COPY docker/start_g1_base.sh /start_g1_base.sh
-RUN chmod +x /start_g1_base.sh
+# 排障用：docker exec 不走 entrypoint，ROS 环境是空的。
+# 有了它就能 `docker exec g1-base rosenv ros2 topic list`
+COPY docker/rosenv /usr/local/bin/rosenv
+RUN chmod +x /start_g1_base.sh /usr/local/bin/rosenv
 
 # 运行时可写数据统一落到数据卷，容器重建不丢现场的图和路线。
 # LIO_WORKSPACE_ROOT 是 config/robot_env.sh 早就留好的钩子：

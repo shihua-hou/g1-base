@@ -1,0 +1,12 @@
+#!/bin/sh
+# 在容器里以「和各个 ROS 节点完全相同的环境」执行命令。
+#
+#   docker exec g1-base rosenv ros2 topic list
+#   docker exec g1-base rosenv ros2 topic echo /odom_2d --once
+#   docker exec -it g1-base rosenv ros2 run tf2_ros tf2_echo map base_link
+#
+# docker exec 不经过 entrypoint，所以 ROS_DOMAIN_ID / CYCLONEDDS_URI / PATH
+# 这些都没设，直接敲 ros2 会 command not found。
+# 这里把 1 号进程（entrypoint 拉起来的那个）的环境整份搬过来，
+# NUL 分隔交给 xargs -0，含空格的值也不会被拆坏。
+exec xargs -0 -a /proc/1/environ env "$@"
