@@ -43,6 +43,7 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
+            "battery_bridge = g1_base.battery_bridge:main",
             "cmd_vel_mock = g1_base.cmd_vel_mock:main",
             "collect_dynamic_obstacle_debug = g1_base.collect_dynamic_obstacle_debug:main",
             "diag_bt_navigator = g1_base.diag_bt_navigator:main",

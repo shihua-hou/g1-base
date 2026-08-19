@@ -102,8 +102,13 @@ done
 run_node g1_control_server &
 CTL_PID=$!
 
+# 电量桥接：domain 0 的 /lf/battery_alarm → domain 42 的 /battery_state
+# 挂了不影响导航，不加入命脉监控；web_bridge 会自动发现 /battery_state
+run_node battery_bridge > /tmp/battery_bridge.log 2>&1 &
+BAT_PID=$!
+
 stop_all() {
-    kill -TERM $NAV_PID $BRIDGE_PID $CTL_PID $WEB_PID 2>/dev/null || true
+    kill -TERM $NAV_PID $BRIDGE_PID $CTL_PID $WEB_PID $BAT_PID 2>/dev/null || true
     # 循环里的子进程要一起收掉
     pkill -TERM -f g1_web_bridge 2>/dev/null || true
 }
