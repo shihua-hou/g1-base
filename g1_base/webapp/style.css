@@ -74,11 +74,11 @@
   --bar-h: clamp(50px, 7.2vh, 62px);
   --gap: clamp(8px, 1.5vh, 15px);
   --pad: clamp(10px, 1.9vh, 18px);
-  --fs-xs: clamp(10px, 1.32vh, 12px);
-  --fs-sm: clamp(11.5px, 1.6vh, 14px);
-  --fs-md: clamp(13px, 1.85vh, 16px);
-  --fs-lg: clamp(15px, 2.3vh, 20px);
-  --fs-xl: clamp(19px, 3.1vh, 28px);
+  --fs-xs: clamp(11px, 1.5vh, 13px);
+  --fs-sm: clamp(13px, 1.85vh, 16px);
+  --fs-md: clamp(15px, 2.15vh, 18px);
+  --fs-lg: clamp(17px, 2.65vh, 23px);
+  --fs-xl: clamp(22px, 3.5vh, 32px);
   --tap: clamp(38px, 5.6vh, 50px);
 }
 
@@ -335,13 +335,13 @@ body {
 .stack > .pane.fixed > .pane-body { overflow-y: auto; overscroll-behavior: contain; }
 
 /* ══ 首页左栏：系统运行状态（重做） ══ */
-.status-col .pane-body { display: flex; flex-direction: column; gap: clamp(8px, 1.3vh, 14px); padding: clamp(9px, 1.4vh, 14px); }
+.status-col .pane-body { display: flex; flex-direction: column; gap: clamp(8px, 1.3vh, 14px); padding: clamp(9px, 1.4vh, 14px); background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%); }
 
 /* 当前任务：整栏的视觉锚点 */
 .task-block {
   border-radius: var(--r-md);
   border: 1px solid var(--line-soft);
-  background: var(--well);
+  background: linear-gradient(135deg, var(--well) 0%, var(--surface-2) 100%);
   padding: clamp(9px, 1.4vh, 14px);
   position: relative;
   overflow: hidden;
@@ -373,7 +373,7 @@ body {
 .gauge {
   border: 1px solid var(--line-soft);
   border-radius: var(--r-md);
-  background: var(--surface);
+  background: linear-gradient(135deg, var(--surface) 0%, var(--surface-2) 100%);
   padding: clamp(7px, 1.1vh, 12px) 4px clamp(6px, .9vh, 10px);
   display: flex; flex-direction: column; align-items: center; gap: 4px;
 }
@@ -384,7 +384,7 @@ body {
 .gauge.is-crit .ring-fg { stroke: var(--crit); }
 .gauge .ring-text {
   font-family: var(--mono); font-variant-numeric: tabular-nums;
-  font-size: 21px; font-weight: 600; fill: var(--ink);
+  font-size: clamp(22px, 3.2vh, 28px); font-weight: 600; fill: var(--ink);
 }
 .gauge.is-warn .ring-text { fill: var(--warn); }
 .gauge.is-crit .ring-text { fill: var(--crit); }
@@ -394,7 +394,7 @@ body {
 .battery-block {
   border: 1px solid var(--line-soft);
   border-radius: var(--r-md);
-  background: var(--well);
+  background: linear-gradient(135deg, var(--well) 0%, var(--surface-2) 100%);
   padding: clamp(8px, 1.2vh, 12px) clamp(10px, 1vw, 14px);
   flex-shrink: 0;
 }
@@ -405,7 +405,7 @@ body {
 .battery-block.is-warn .battery-value { color: var(--warn); }
 .battery-block.is-crit .battery-value { color: var(--crit); }
 .battery-track { height: clamp(6px, 1vh, 10px); border-radius: 999px; background: var(--line-soft); overflow: hidden; }
-.battery-fill { height: 100%; border-radius: 999px; background: var(--ok); transition: width .5s ease; }
+.battery-fill { height: 100%; border-radius: 999px; background: var(--ok); background-image: linear-gradient(180deg, rgba(255,255,255,.3) 0%, transparent 40%, rgba(0,0,0,.08) 100%); transition: width .5s ease; }
 .battery-block.is-warn .battery-fill { background: var(--warn); }
 .battery-block.is-crit .battery-fill { background: var(--crit); }
 .battery-block.is-dim .battery-fill { background: var(--ink-3); }
@@ -432,8 +432,13 @@ body {
 .kv .v.is-crit { color: var(--crit); }
 .kv .v.is-dim { color: var(--ink-3); }
 
-/* 左栏状态面板的 kv-list 撑满中间剩余空间，消除"上方挤下方空" */
-.status-col .kv-list { flex: 1; min-height: 0; justify-content: space-between; }
+/* 左栏状态面板的 kv-list 撑满中间剩余空间；
+   kv 行用 flex:1 等分高度，标签靠左上、值靠右下，形成对角线扫视节奏 */
+.status-col .kv-list { flex: 1; min-height: 0; }
+.status-col .kv { flex: 1; align-items: stretch; padding: clamp(8px, 1.2vh, 14px) clamp(10px, 1.2vw, 14px); }
+.status-col .kv .k { align-self: flex-start; }
+.status-col .kv .v { align-self: flex-end; font-size: var(--fs-md); }
+.status-col .kv:nth-child(even) { background: linear-gradient(90deg, var(--surface) 50%, var(--well) 100%); }
 
 .status-foot {
   margin-top: auto;
