@@ -538,6 +538,12 @@
     const navDot = navm.ready ? "ok" : navm.state === "ERROR" ? "bad" : "warn";
     const navTone = navm.ready ? "is-ok" : navm.state === "ERROR" ? "is-crit" : "is-warn";
     const battery = sys.battery_percent;
+    const batteryTone = battery == null ? "is-dim"
+      : battery <= 20 ? "is-crit"
+      : battery <= 40 ? "is-warn" : "is-ok";
+    const batteryPct = battery != null ? Math.max(0, Math.min(100, battery)) : 0;
+    const batteryText = battery != null ? `${battery}%`
+      : (sys.battery_topic ? "读数过期" : "未接入");
 
     return `
       <div class="task-block ${taskTone}">
@@ -551,6 +557,16 @@
         ${gaugeHtml("内存", sys.mem_percent)}
       </div>
 
+      <div class="battery-block ${batteryTone}">
+        <div class="battery-head">
+          <span class="battery-label">电量</span>
+          <span class="battery-value num">${escapeHtml(batteryText)}</span>
+        </div>
+        <div class="battery-track">
+          <div class="battery-fill" style="width:${batteryPct}%"></div>
+        </div>
+      </div>
+
       <div class="kv-list">
         ${kvHtml("导航栈", navm.state || "未连接", navTone, navDot)}
         ${kvHtml("定位", pose ? `${pose.x.toFixed(2)}, ${pose.y.toFixed(2)}` : "无 TF",
@@ -558,8 +574,6 @@
         ${kvHtml("朝向", pose ? `${pose.yaw_deg.toFixed(0)}°` : "—", pose ? "" : "is-dim")}
         ${kvHtml("地图", (s.current_map && s.current_map.base_name) || "—",
                  s.current_map ? "" : "is-dim")}
-        ${kvHtml("电量", battery != null ? `${battery} %` : (sys.battery_topic ? "读数过期" : "未接入"),
-                 battery == null ? "is-dim" : battery <= 20 ? "is-crit" : "is-ok")}
         ${kvHtml("已运行", fmtDuration(sys.uptime_sec))}
       </div>
 

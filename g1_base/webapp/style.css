@@ -390,6 +390,26 @@ body {
 .gauge.is-crit .ring-text { fill: var(--crit); }
 .gauge-cap { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
 
+/* 电量条：从 kv-list 提取出来做成带进度条的独立块 */
+.battery-block {
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  background: var(--well);
+  padding: clamp(8px, 1.2vh, 12px) clamp(10px, 1vw, 14px);
+  flex-shrink: 0;
+}
+.battery-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: clamp(5px, .8vh, 8px); }
+.battery-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+.battery-value { font-size: var(--fs-lg); font-weight: 650; color: var(--ink); }
+.battery-block.is-ok .battery-value { color: var(--ok); }
+.battery-block.is-warn .battery-value { color: var(--warn); }
+.battery-block.is-crit .battery-value { color: var(--crit); }
+.battery-track { height: clamp(6px, 1vh, 10px); border-radius: 999px; background: var(--line-soft); overflow: hidden; }
+.battery-fill { height: 100%; border-radius: 999px; background: var(--ok); transition: width .5s ease; }
+.battery-block.is-warn .battery-fill { background: var(--warn); }
+.battery-block.is-crit .battery-fill { background: var(--crit); }
+.battery-block.is-dim .battery-fill { background: var(--ink-3); }
+
 /* 指示灯清单 */
 .kv-list { display: flex; flex-direction: column; border: 1px solid var(--line-soft); border-radius: var(--r-md); overflow: hidden; flex-shrink: 0; }
 .kv {
@@ -411,6 +431,10 @@ body {
 .kv .v.is-warn { color: var(--warn); }
 .kv .v.is-crit { color: var(--crit); }
 .kv .v.is-dim { color: var(--ink-3); }
+
+/* 左栏状态面板的 kv-list 撑满中间剩余空间，消除"上方挤下方空" */
+.status-col .kv-list { flex: 1; min-height: 0; justify-content: space-between; }
+
 .status-foot {
   margin-top: auto;
   padding-top: clamp(6px, 1vh, 10px);
