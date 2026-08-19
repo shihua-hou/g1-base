@@ -995,25 +995,52 @@
     const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     return v || fallback;
   };
-  const MAP_COLORS = {
-    robot: cssVar("--ok", "#17836a"),
-    goal: cssVar("--crit", "#b8453f"),
-    reloc: cssVar("--warn", "#96701f"),
-    waypoint: cssVar("--signal", "#2b87cc"),
-    waypointLine: "rgba(43, 135, 204, .45)",
-    path: cssVar("--signal", "#2b87cc"),
-    wedge: "rgba(23, 131, 106, .20)",
-    placeHalo: "rgba(184, 69, 63, .16)",
-    ink: cssVar("--ink", "#16202b"),
-    // 实时激光：用边缘色青绿，跟静态地图的黑白灰拉开，一眼分得清
-    // "地图里记着的障碍物" 和 "此刻真的挡在前面的东西"
-    scan: cssVar("--edge", "#1fa89f"),
-    // 禁行区：半透明红块 + 实线边。和地图本身的纯黑障碍拉开，
-    // 不然改完看不出哪块是自己划的、哪块是雷达扫到的。
-    zoneFill: "rgba(184, 69, 63, .28)",
-    zoneLine: cssVar("--crit", "#b8453f"),
-    brush: cssVar("--signal", "#2b87cc"),
-  };
+  // 当前是不是夜间。不缓存：系统主题随时可能变，而这个查询很便宜。
+  function isDarkTheme() {
+    return !!(window.matchMedia
+      && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  }
+
+  function readMapColors() {
+    return {
+      robot: cssVar("--ok", "#17836a"),
+      goal: cssVar("--crit", "#b8453f"),
+      reloc: cssVar("--warn", "#96701f"),
+      waypoint: cssVar("--signal", "#2b87cc"),
+      waypointLine: "rgba(43, 135, 204, .45)",
+      path: cssVar("--signal", "#2b87cc"),
+      wedge: "rgba(23, 131, 106, .20)",
+      placeHalo: "rgba(184, 69, 63, .16)",
+      ink: cssVar("--ink", "#16202b"),
+      // 实时激光：用边缘色青绿，跟静态地图的黑白灰拉开，一眼分得清
+      // "地图里记着的障碍物" 和 "此刻真的挡在前面的东西"
+      scan: cssVar("--edge", "#1fa89f"),
+      // 禁行区：半透明红块 + 实线边。和地图本身的纯黑障碍拉开，
+      // 不然改完看不出哪块是自己划的、哪块是雷达扫到的。
+      zoneFill: "rgba(184, 69, 63, .28)",
+      zoneLine: cssVar("--crit", "#b8453f"),
+      brush: cssVar("--signal", "#2b87cc"),
+    };
+  }
+
+  let MAP_COLORS = readMapColors();
+
+  // 系统主题切换时把地图配色重算一遍。
+  // cssVar 是加载时读一次的，不重算的话白天设好的深色点会留在夜间界面上，
+  // 而夜间的亮色点在白天又会糊成一片——这类"只在切主题时才出现"的问题
+  // 现场几乎不可能想到去查。
+  if (window.matchMedia) {
+    const themeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const onThemeChange = () => {
+      MAP_COLORS = readMapColors();
+      if (navUi.view) navUi.view.redraw();
+      if (mapEdit.view) mapEdit.view.redraw();
+      // 3D 点云视图不用管：它是固定的深色舞台（mapcloud.js 里写死的
+      // 0x0f1720），两个主题下都成立，本来就不跟随。
+    };
+    if (themeQuery.addEventListener) themeQuery.addEventListener("change", onThemeChange);
+    else if (themeQuery.addListener) themeQuery.addListener(onThemeChange);
+  }
   const HOLD_MS = 320;   // 长按多久算"放置"，短于这个就是普通拖动地图
 
   function mountMapView(wrapEl, {
@@ -1267,7 +1294,14 @@
         const iw = img.naturalWidth || geo.render_width;
         const ih = img.naturalHeight || geo.render_height;
         ctx.imageSmoothingEnabled = view.scale < 1;
+        // 夜间把底图反相：pgm 是白底(可通行)黑线(障碍)，直接摆在深色界面上
+        // 是一大块刺眼的白。反相之后可通行变近黑、障碍变亮线、未知变深灰，
+        // 三者关系不变，观感和 RViz/Foxglove 的夜间地图一致。
+        // 只包住 drawImage —— 位姿、激光、禁行区画在同一个 canvas 上，
+        // 用 CSS 滤镜的话它们的颜色会一起被改掉。
+        if (isDarkTheme()) ctx.filter = "invert(1)";
         ctx.drawImage(img, -iw / 2, -ih / 2, iw, ih);
+        ctx.filter = "none";
         ctx.restore();
 
         drawPath();

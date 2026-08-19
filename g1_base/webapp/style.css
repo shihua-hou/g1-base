@@ -1,49 +1,71 @@
-/* G1 Robot Console — 浅色仪表盘主题（平板固定视口版）
+/* G1 Robot Console — 仪表盘主题（平板固定视口版）
    设计约束：
    1. 任何页面都不产生整页滚动，全部内容压进一屏；确实超长的列表
       只在自己的面板里滚，页面骨架永远不动。
    2. 尺寸随视口高度流动 (clamp + vh)，适配 10~12 寸横屏平板。
-   3. 地面(石板灰) / 面板(白) / 凹槽 三层分离建立物理层次；
-      所有遥测数值走等宽 + tabular-nums，与界面文字形成角色区分。 */
+   3. 地面 / 面板 / 凹槽 三层分离建立物理层次；所有遥测数值走等宽 +
+      tabular-nums，与界面文字形成角色区分。
+   4. 日夜双主题跟随系统，靠的是【同一套 token 名换值】——
+      组件层一行都不用改，也就不会出现"某个控件忘了适配夜间"的情况。
+      新写组件时只要用 token、不写死颜色，就自动两套都对。 */
 
 :root {
-  /* 背景中性灰，白色面板浮在上面；描边带青绿倾向 —— 灰 / 白 / 青绿 三层 */
-  --ground: #eceef1;
-  --ground-2: #e4e8ec;
+  color-scheme: light;
+
+  /* ── 底层：冷中性灰。带一点蓝，比纯灰显精密，避免发黄的廉价感 ── */
+  --ground: #e9ecf1;
+  --ground-2: #dfe4ea;
   --surface: #ffffff;
-  --well: #f5f7f9;
-  --ink: #16202b;
-  --ink-2: #55626f;
-  --ink-3: #8795a1;
-  --line: #dce7e7;
-  --line-strong: #bdd3d3;
-  --line-soft: #ebf1f1;
+  --surface-2: #fbfcfd;      /* 面板内的次级块面 */
+  --well: #f3f6f9;
+  --ink: #101720;
+  --ink-2: #4d5a68;
+  --ink-3: #7d8b9a;
+  --line: #dde4ec;
+  --line-strong: #c3cfdb;
+  --line-soft: #eaeff5;
 
-  /* 主色：天空蓝。填充块用它，保证白字够清楚 */
-  --signal: #2b87cc;
-  --signal-2: #1c6ba6;
-  --sky-soft: #eaf4fd;
-  /* 边缘色：青绿。焦点环、选中描边、品牌点走这个 */
-  --edge: #1fa89f;
-  --edge-soft: #e4f5f3;
+  /* ── 主色：更深一档的天空蓝，白字对比度足够 ── */
+  --signal: #1f77c4;
+  --signal-2: #175a97;
+  --sky-soft: #e8f2fc;
+  /* 边缘色：青绿。焦点环、选中描边、品牌点 */
+  --edge: #12a094;
+  --edge-soft: #e0f4f2;
 
-  /* 语义色：压到能当正文读的对比度，不刺眼也不虚 */
-  --ok: #17836a;
-  --warn: #96701f;
-  --crit: #b8453f;
-  --ok-soft: rgba(23, 131, 106, .09);
-  --warn-soft: rgba(150, 112, 31, .10);
-  --crit-soft: rgba(184, 69, 63, .09);
+  /* ── 语义色：压到能当正文读的对比度 ── */
+  --ok: #10795f;
+  --warn: #8a6717;
+  --crit: #b23c37;
+  --ok-soft: rgba(16, 121, 95, .09);
+  --warn-soft: rgba(138, 103, 23, .10);
+  --crit-soft: rgba(178, 60, 55, .09);
 
-  --stage-dark: #1b2229;   /* 画面/点云这类"深色舞台"的统一底色 */
+  --stage-dark: #12181f;     /* 相机 / 点云这类"深色舞台"的底色 */
+  --stage-ink: #93a0ad;
+  --stage-ink-2: #d7e2ec;
+  --stage-panel: rgba(15, 23, 32, .72);
+  --stage-line: rgba(255, 255, 255, .12);
+
+  /* 悬浮在画布上的小控件（地图工具条等）：日间是半透明白 */
+  --float: rgba(255, 255, 255, .92);
+  --float-2: rgba(255, 255, 255, .8);
+  --scroll-thumb: #c4ccd6;
+
+  /* 摇杆底盘 */
+  --stick-face: radial-gradient(circle at 50% 42%, #ffffff 0%, var(--well) 62%, #e2e7ee 100%);
+  --stick-inset: inset 0 2px 6px rgba(16, 23, 32, .07);
 
   --r-sm: 10px;
   --r-md: 12px;
   --r-lg: 14px;
 
-  /* 阴影收到几乎看不见，层次靠底色差和描边，而不是浮起来的卡片 */
-  --sh-panel: 0 1px 2px rgba(24, 32, 41, .04);
-  --sh-lift: 0 6px 18px -8px rgba(24, 32, 41, .22);
+  /* 阴影克制：层次主要靠底色差和描边，不靠"浮起来的卡片" */
+  --sh-panel: 0 1px 2px rgba(16, 23, 32, .05);
+  --sh-lift: 0 8px 22px -10px rgba(16, 23, 32, .26);
+  /* 强调元素的辉光。夜间会明显加强，这是"科技感"的主要来源 */
+  --glow: 0 0 0 3px rgba(18, 160, 148, .16);
+  --glow-signal: 0 0 0 3px rgba(31, 119, 196, .18);
 
   --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", "Noto Sans CJK SC", sans-serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "JetBrains Mono", monospace;
@@ -58,6 +80,65 @@
   --fs-lg: clamp(15px, 2.3vh, 20px);
   --fs-xl: clamp(19px, 3.1vh, 28px);
   --tap: clamp(38px, 5.6vh, 50px);
+}
+
+/* ══ 夜间模式 ══
+   跟随系统，不做手动开关——现场是平板挂在机器人上，没人会去点主题按钮，
+   而展厅的灯光变化正是系统主题切换的时机。
+
+   配色不用纯黑：纯黑配白字在 LCD 上眩光重，长时间盯着累。用带蓝的深炭
+   （#0e141b 一档档往上抬），面板比地面亮而不是暗——和日间的"白面板浮在灰
+   地面上"保持同一套物理直觉，用户不需要重新学。 */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --ground: #0b1016;
+    --ground-2: #070b10;
+    --surface: #141c25;
+    --surface-2: #1a2430;
+    --well: #10181f;
+    --ink: #e8eef5;
+    --ink-2: #a3b1c0;
+    --ink-3: #6d7d8d;
+    --line: #24303d;
+    --line-strong: #38485a;
+    --line-soft: #1b242f;
+
+    /* 暗底上主色要提亮，否则又暗又糊；饱和度略降，免得刺眼 */
+    --signal: #4aa3e8;
+    --signal-2: #7bc0f5;
+    --sky-soft: rgba(74, 163, 232, .13);
+    --edge: #2fc9bb;
+    --edge-soft: rgba(47, 201, 187, .14);
+
+    --ok: #3fd0a4;
+    --warn: #e0b24a;
+    --crit: #ff6b62;
+    --ok-soft: rgba(63, 208, 164, .13);
+    --warn-soft: rgba(224, 178, 74, .13);
+    --crit-soft: rgba(255, 107, 98, .13);
+
+    --stage-dark: #070b10;
+    --stage-ink: #7d8b9a;
+    --stage-ink-2: #d7e2ec;
+    --stage-panel: rgba(7, 11, 16, .78);
+    --stage-line: rgba(255, 255, 255, .1);
+
+    /* 暗色下悬浮控件用深色玻璃，不能还是白的 */
+    --float: rgba(20, 28, 37, .9);
+    --float-2: rgba(20, 28, 37, .78);
+    --scroll-thumb: #2c3846;
+
+    --stick-face: radial-gradient(circle at 50% 42%, #1d2833 0%, var(--well) 62%, #0a1016 100%);
+    --stick-inset: inset 0 2px 8px rgba(0, 0, 0, .5);
+
+    /* 暗色里阴影几乎看不见，层次改用更亮的描边 + 辉光来建立 */
+    --sh-panel: 0 1px 2px rgba(0, 0, 0, .5);
+    --sh-lift: 0 10px 28px -12px rgba(0, 0, 0, .8);
+    --glow: 0 0 0 3px rgba(47, 201, 187, .26);
+    --glow-signal: 0 0 0 3px rgba(74, 163, 232, .26);
+  }
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -82,7 +163,10 @@ html, body {
 }
 
 /* 地面改成近乎纯色，只留一层极淡的上下过渡 */
-body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--ground-2) 100%); }
+body {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--ground) 46%, var(--ground-2) 100%);
+  /* 夜间时顶部那道亮不该是纯白，靠 token 自己换过去 */
+}
 
 #app {
   position: relative;
@@ -134,7 +218,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 .sb-mark {
   width: 9px; height: 9px; border-radius: 50%;
   background: var(--edge);
-  box-shadow: 0 0 0 4px rgba(31, 168, 159, .16);
+  box-shadow: var(--glow);
   flex-shrink: 0;
   align-self: center;
 }
@@ -191,9 +275,9 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 .sb-clock { color: var(--ink); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex-shrink: 0; }
-.dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(23, 131, 106, .16); }
-.dot.bad { background: var(--crit); box-shadow: 0 0 0 3px rgba(184, 69, 63, .16); }
-.dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(150, 112, 31, .16); }
+.dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.dot.bad { background: var(--crit); box-shadow: 0 0 0 3px var(--crit-soft); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
 
 /* ══ 页面骨架：填满剩余高度，自身永不滚动 ══ */
 .page {
@@ -337,7 +421,8 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 }
 
 /* ══ 首页中栏：机器人舞台 ══ */
-.robot-pane { padding: 0; position: relative; background: linear-gradient(180deg, #fdfefe 0%, #eaf0f1 100%); }
+.robot-pane { padding: 0; position: relative;
+  background: linear-gradient(180deg, var(--surface-2) 0%, var(--well) 100%); }
 .robot-stage { flex: 1; min-height: 0; position: relative; touch-action: none; cursor: grab; }
 .robot-stage:active { cursor: grabbing; }
 .robot-stage canvas { display: block; width: 100% !important; height: 100% !important; }
@@ -357,7 +442,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   display: flex; align-items: center; gap: 6px;
   padding: clamp(6px, 1vh, 11px) clamp(8px, 1vw, 14px);
   border-top: 1px solid var(--line-soft);
-  background: rgba(255, 255, 255, .72);
+  background: var(--float-2);
   overflow-x: auto;
   overscroll-behavior-x: contain;
 }
@@ -638,15 +723,15 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 .btn:focus-visible { outline: 2px solid var(--edge); outline-offset: 2px; }
 .btn.primary { background: var(--signal); border-color: var(--signal); color: #fff; }
 .btn.primary:active { background: var(--signal-2); border-color: var(--signal-2); color: #fff; }
-.btn.success { background: var(--ok-soft); border-color: rgba(23, 131, 106, .34); color: var(--ok); }
+.btn.success { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
 .btn.success:active { background: var(--ok); border-color: var(--ok); color: #fff; }
-.btn.warn { background: var(--warn-soft); border-color: rgba(150, 112, 31, .34); color: var(--warn); }
+.btn.warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
 .btn.warn:active { background: var(--warn); border-color: var(--warn); color: #fff; }
-.btn.danger { background: var(--crit-soft); border-color: rgba(184, 69, 63, .36); color: var(--crit); }
+.btn.danger { background: var(--crit-soft); border-color: var(--crit); color: var(--crit); }
 .btn.danger:active { background: var(--crit); border-color: var(--crit); color: #fff; }
 /* 急停这类真·危险动作才用整块实色，保证一眼能找到 */
 .btn.danger.solid { background: var(--crit); border-color: var(--crit); color: #fff; }
-.btn.danger.solid:active { background: #9c3a35; border-color: #9c3a35; }
+.btn.danger.solid:active { filter: brightness(.88); }
 .btn.ghost { background: var(--well); border-color: var(--line); color: var(--ink-3); }
 .btn.block { width: 100%; }
 .btn.sm { padding: clamp(5px, .85vh, 9px) clamp(8px, .9vw, 13px); font-size: var(--fs-xs); }
@@ -685,7 +770,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   outline: none;
   background: var(--surface);
   border-color: var(--edge);
-  box-shadow: 0 0 0 3px rgba(31, 168, 159, .18);
+  box-shadow: var(--glow);
 }
 .field-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 
@@ -721,7 +806,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   width: clamp(30px, 4.4vh, 40px); height: clamp(30px, 4.4vh, 40px);
   border-radius: var(--r-sm);
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, .92);
+  background: var(--float);
   color: var(--ink-2);
   font-size: var(--fs-md);
   cursor: pointer;
@@ -731,7 +816,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 .map-hint {
   position: absolute; left: 10px; bottom: 8px; z-index: 3;
   font-size: var(--fs-xs); color: var(--ink-3);
-  background: rgba(255, 255, 255, .8);
+  background: var(--float-2);
   border-radius: 999px; padding: 3px 10px;
   pointer-events: none;
 }
@@ -774,14 +859,14 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   border-radius: 50%;
   border: 2px solid var(--line);
   background:
-    radial-gradient(circle at 50% 42%, #ffffff 0%, var(--well) 62%, #e4e8ee 100%);
-  box-shadow: inset 0 2px 6px rgba(24, 32, 41, .07);
+    var(--stick-face);
+  box-shadow: var(--stick-inset);
   position: relative;
   display: flex; align-items: center; justify-content: center;
   touch-action: none;
   cursor: grab;
 }
-.stick-base.active { border-color: var(--edge); box-shadow: inset 0 2px 6px rgba(24,32,41,.08), 0 0 0 4px rgba(31,168,159,.18); }
+.stick-base.active { border-color: var(--edge); box-shadow: var(--stick-inset), var(--glow); }
 /* 十字准线，提示两个轴 */
 .stick-base::before, .stick-base::after {
   content: ""; position: absolute; background: var(--line-soft);
@@ -792,7 +877,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   width: 42%; height: 42%;
   border-radius: 50%;
   background: linear-gradient(180deg, var(--signal-2) 0%, var(--signal) 100%);
-  box-shadow: 0 3px 10px -2px rgba(43, 135, 204, .45);
+  box-shadow: 0 3px 10px -2px var(--signal); 
   position: relative; z-index: 2;
   transition: transform .06s linear;
   pointer-events: none;
@@ -801,7 +886,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 /* ── 建图 3D 点云 ── */
 .cloud-stage {
   flex: 1; min-width: 0; min-height: 0;
-  background: #0f1720;
+  background: var(--stage-dark);
   touch-action: none;
   cursor: grab;
 }
@@ -812,8 +897,8 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 .cloud-legend {
   position: absolute; right: clamp(10px, 1vw, 16px); bottom: clamp(10px, 1.4vh, 18px);
   display: flex; align-items: stretch; gap: 7px;
-  background: rgba(15, 23, 32, .72);
-  border: 1px solid rgba(255, 255, 255, .12);
+  background: var(--stage-panel);
+  border: 1px solid var(--stage-line);
   border-radius: var(--r-sm);
   padding: 7px 9px;
   pointer-events: none;
@@ -834,20 +919,20 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 /* ── 相机画面 ── */
 .camera-pane { background: var(--stage-dark); }
 .camera-pane .pane-head { background: var(--surface); border-bottom-color: var(--line); }
-.stage-text { color: #93a0ad; }
+.stage-text { color: var(--stage-ink); }
 .camera-stage { display: flex; align-items: center; justify-content: center; background: var(--stage-dark); overflow: hidden; }
 .camera-holder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
 .camera-img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
-.camera-empty { text-align: center; padding: 16px; color: #b9c8d8; }
-.camera-empty-title { font-size: var(--fs-lg); font-weight: 650; color: #dbe6f0; }
+.camera-empty { text-align: center; padding: 16px; color: var(--stage-ink); }
+.camera-empty-title { font-size: var(--fs-lg); font-weight: 650; color: var(--stage-ink-2); }
 .camera-empty-body { font-size: var(--fs-sm); margin-top: 8px; line-height: 1.6; }
 .camera-empty-body code { color: #7fd4e8; font-family: var(--mono); font-size: var(--fs-xs); }
-.camera-empty-note { font-size: var(--fs-xs); color: #7d8fa3; margin-top: 12px; line-height: 1.6; }
+.camera-empty-note { font-size: var(--fs-xs); color: var(--stage-ink); margin-top: 12px; line-height: 1.6; }
 
 /* ── 模态框 ── */
 .modal-mask {
   position: fixed; inset: 0; z-index: 200;
-  background: rgba(13, 22, 34, .42);
+  background: var(--stage-panel);
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
 }
@@ -892,7 +977,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   font-size: 10px; font-weight: 700;
   padding: 2px 7px; border-radius: 4px;
   background: var(--edge-soft); color: var(--signal);
-  border: 1px solid rgba(36, 148, 176, .35);
+  border: 1px solid var(--edge);
   letter-spacing: .07em; text-transform: uppercase;
 }
 
@@ -909,7 +994,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   overscroll-behavior: contain;
   white-space: pre-wrap;
   word-break: break-all;
-  color: #46525f;
+  color: var(--ink-2);
 }
 
 .note { color: var(--ink-3); font-size: var(--fs-xs); line-height: 1.55; margin: 8px 0 0; }
@@ -944,7 +1029,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
   margin: 0 auto 16px;
   display: flex; align-items: center; justify-content: center;
   background: var(--edge-soft);
-  border: 1px solid rgba(36, 148, 176, .4);
+  border: 1px solid var(--edge);
   color: var(--signal);
 }
 .connect-mark svg { width: 24px; height: 24px; }
@@ -958,7 +1043,7 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #c3cbd4; border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 6px; border: 2px solid transparent; background-clip: content-box; }
 
 /* ── 竖屏 / 窄屏兜底：列改成行，仍然不产生整页滚动 ── */
 @media (max-width: 900px), (orientation: portrait) {
@@ -1062,3 +1147,105 @@ body { background: linear-gradient(180deg, #f3f5f7 0%, var(--ground) 52%, var(--
 /* 编辑页的"已保存"提示：闪一下绿色让人看见，再淡回去 */
 #edit-saved { transition: color .25s ease; }
 #edit-saved.is-ok { color: var(--ok); font-weight: 700; }
+
+
+/* ══════════════════════════════════════════════════════════════
+   精修层
+   ══════════════════════════════════════════════════════════════
+   这一层只做"质感"，不改布局也不改交互。原则是【克制】——
+   仪表盘的高级感来自克制的层次和稳定的节奏，不是来自特效。
+   凡是会让人分心、或者在夜间造成眩光的效果一律不用：
+   没有毛玻璃模糊（Jetson 上 backdrop-filter 会掉帧）、
+   没有彩色投影、没有持续动画（除了正在忙的转圈）。 */
+
+/* ── 顶栏：加一道极细的顶部高光和底部主色线 ──
+   这两道线是整个界面唯一的"装饰"，它让顶栏看起来是一块有厚度的
+   金属条，而不是一个白色 div。 */
+.statusbar {
+  position: relative;
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+}
+.statusbar::after {
+  content: "";
+  position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--edge) 18%,
+    var(--signal) 50%,
+    var(--edge) 82%,
+    transparent 100%);
+  opacity: .5;
+}
+
+/* 品牌点：呼吸感靠内外两层，不用动画——常驻动画在长时间值守的屏幕上很烦 */
+.sb-mark { box-shadow: 0 0 0 3px var(--edge-soft), 0 0 12px -2px var(--edge); }
+
+/* ── 面板：顶部一道内高光，让白面板有"面"的感觉而不是纯色块 ── */
+.pane {
+  position: relative;
+  background: var(--surface);
+}
+.pane::before {
+  content: "";
+  position: absolute; inset: 0 0 auto 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-soft) 30%, var(--line-soft) 70%, transparent);
+  pointer-events: none;
+}
+
+/* ── 首页大图标磁贴：静止时朴素，按下去才给反馈 ──
+   图标加一点主色渐变，从"线框图"变成"有材质的图形"。 */
+.nav-tile {
+  /* 左上角一抹主色，其余保持纯面板色 —— 同上，不用垂直渐变，
+     免得两个主题的光感方向相反 */
+  background:
+    radial-gradient(120% 90% at 0% 0%, var(--sky-soft) 0%, transparent 46%),
+    var(--surface);
+}
+.nav-tile:active {
+  border-color: var(--edge);
+  box-shadow: var(--sh-lift), var(--glow);
+}
+.nav-tile-icon svg { filter: drop-shadow(0 2px 6px var(--sky-soft)); }
+
+/* ── 数值：遥测数字用等宽 + 轻微紧排，读起来像仪表而不是正文 ── */
+.task-value, .gauge-text, .chip-v, .kv-v {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.015em;
+}
+
+/* ── 主按钮：加一道顶部高光，按下去压平 ── */
+.btn.primary, .btn.danger.solid {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .16), transparent 62%);
+}
+.btn.primary:active, .btn.danger.solid:active { background-image: none; }
+.btn:focus-visible, .side-item:focus-visible, .nav-tile:focus-visible {
+  outline: 2px solid var(--edge);
+  outline-offset: 2px;
+}
+
+/* ── 选中态的标签：底色 + 细边，夜间靠辉光把它托出来 ── */
+.sb-tabs button.active { box-shadow: var(--glow-signal); }
+
+/* ── 深色舞台（相机 / 点云 / 3D 机器人）在夜间要和面板融合 ──
+   日间是"白面板里嵌一块深色画布"，对比强是对的；
+   夜间整体已经是深色，画布再深一档即可，否则像挖了个洞。 */
+@media (prefers-color-scheme: dark) {
+  .robot-pane {
+    background: radial-gradient(120% 100% at 50% 0%, var(--surface-2) 0%, var(--well) 70%);
+  }
+  /* 暗色下纯白文字偏亮，压到 --ink 这一档更耐看 */
+  .btn.primary, .btn.success:active, .btn.warn:active,
+  .btn.danger:active, .btn.danger.solid, .sb-tabs button.active,
+  .motion-chip.active {
+    color: #0b1016;
+  }
+  /* 地图缩略图列表里一次好几张白底图，压一点亮度。
+     主画布不在这里处理——它和位姿、激光点画在同一个 canvas 上，
+     CSS 滤镜会把标记颜色一起改掉，改在绘制时只作用于底图（见 app.js）。 */
+  .thumb { filter: brightness(.9) contrast(1.05); }
+}
+
+/* ── 减少动态效果：系统开了就别转圈 ── */
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
