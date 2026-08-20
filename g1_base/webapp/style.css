@@ -346,6 +346,10 @@ body {
   position: relative;
   overflow: hidden;
   flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 2px;
 }
 .task-block::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
@@ -354,16 +358,19 @@ body {
 .task-block.tone-ok::before { background: var(--ok); }
 .task-block.tone-run::before { background: var(--signal-2); }
 .task-block.tone-crit::before { background: var(--crit); }
-.task-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.task-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); flex: 0 0 100%; }
 .task-value {
-  font-size: var(--fs-lg); font-weight: 650; color: var(--ink); margin-top: 3px;
+  font-size: var(--fs-lg); font-weight: 650; color: var(--ink);
+  margin-left: auto;  /* 推到右侧 */
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .task-block.tone-ok .task-value { color: var(--ok); }
 .task-block.tone-run .task-value { color: var(--signal); }
 .task-block.tone-crit .task-value { color: var(--crit); }
 .task-sub {
-  font-size: var(--fs-xs); color: var(--ink-2); margin-top: 2px;
+  font-size: var(--fs-xs); color: var(--ink-2);
+  flex: 0 0 100%;
+  text-align: right;
   font-family: var(--mono);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
