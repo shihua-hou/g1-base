@@ -2089,6 +2089,176 @@ img { -webkit-user-drag: none; user-select: none; }
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   抛光层
+   ══════════════════════════════════════════════════════════════
+   最后一轮细节打磨，只动视觉元素，不碰布局和交互。 */
+
+/* ── 仪表环：背景环虚线化 ──
+   把实心背景环改成短虚线，看起来更像仪表刻度，
+   而不是一个空白圆环。每个小格约占 5% 的圆周长。 */
+.gauge .ring-bg {
+  stroke-dasharray: 4 4;
+  stroke-width: 5;
+  opacity: .6;
+}
+/* 前景环内侧加一道极淡的光晕（用第二层 ring 实现） */
+.gauge .ring-fg {
+  filter: drop-shadow(0 0 4px var(--signal-2));
+}
+.gauge.is-warn .ring-fg { filter: drop-shadow(0 0 4px var(--warn)); }
+.gauge.is-crit .ring-fg { filter: drop-shadow(0 0 4px var(--crit)); }
+
+/* ── stage-tag / stage-hint：药丸背景 ──
+   3D 机器人面板左上角的标签和右上角的操作提示，
+   原来就是裸文字，浮在 3D 画上可读性差。
+   加一层半透明药丸背景，让文字永远看得清。 */
+.stage-tag, .stage-hint {
+  background: var(--float-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 3px clamp(8px, 1vw, 12px);
+  backdrop-filter: blur(0);  /* 不用真毛玻璃，但声明意图 */
+}
+
+/* ── status-foot：渐变分隔线 ──
+   状态栏底部的 IP + hostname，分隔线改成两端淡出的渐变。 */
+.status-foot {
+  border-top: none;
+  position: relative;
+  padding-top: clamp(8px, 1.2vh, 14px);
+}
+.status-foot::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--line) 20%,
+    var(--line) 80%,
+    transparent 100%);
+  pointer-events: none;
+}
+/* IP 和 hostname 加点视觉区分 */
+.status-foot span:first-child {
+  color: var(--signal);
+  font-weight: 600;
+}
+
+/* ── 电池低电量脉冲 ──
+   电量低于 20% 时，整个电池块边缘微微脉冲，提示需要充电。 */
+@keyframes battery-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--crit-soft); }
+  50%      { box-shadow: 0 0 0 4px var(--crit-soft); }
+}
+.battery-block.is-crit {
+  animation: battery-pulse 2.5s ease-in-out infinite;
+}
+
+/* ── 导航页地图名标签 ──
+   导航页头部的地图名标签，加一个左侧小圆点指示状态。 */
+.map-name-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.map-name-tag::before {
+  content: "";
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+.map-name-tag.is-warn::before {
+  background: var(--warn);
+  animation: dot-ok-pulse 2s ease-in-out infinite;
+}
+
+/* ── modal 关闭按钮美化 ──
+   模态框右上角的关闭按钮，改成圆形 + X 图标风格。 */
+.modal-head [data-modal-close] {
+  width: clamp(28px, 4vh, 36px);
+  height: clamp(28px, 4vh, 36px);
+  border-radius: 50%;
+  background: var(--well);
+  border: 1px solid var(--line);
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-sm);
+  padding: 0;
+  transition: background .14s, color .14s, transform .12s ease;
+}
+.modal-head [data-modal-close]:hover {
+  background: var(--crit-soft);
+  color: var(--crit);
+  transform: scale(1.1);
+}
+.modal-head [data-modal-close]:active {
+  transform: scale(.95);
+}
+
+/* ── 导航页巡航点序号圆牌加强 ── */
+.wp-no {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── dot 状态指示灯加强 ──
+   绿色指示灯在状态栏 kv 行里加一道极轻的脉冲，
+   让“在线”状态更有“活着”的感觉。 */
+.kv .dot.ok {
+  animation: dot-ok-pulse 3s ease-in-out infinite;
+}
+
+/* ── 状态栏连接状态加强 ──
+   状态栏右侧的连接状态指示器，文字改为更紧凑的样式。 */
+.sb-conn {
+  gap: 6px;
+  font-weight: 600;
+}
+
+/* ── 导航页 chip-row 小卡片加强 ── */
+.chip {
+  position: relative;
+  overflow: hidden;
+}
+/* 给 chip 加一道极细的左侧色条，对应值的状态色 */
+.chip .chip-v.is-ok ~ .chip-k { color: var(--ok); }
+.chip .chip-v.is-warn ~ .chip-k { color: var(--warn); }
+
+/* ── 暗色模式微雕 ── */
+@media (prefers-color-scheme: dark) {
+  /* stage-tag 在暗色下用更深的背景 */
+  .stage-tag, .stage-hint {
+    background: var(--float);
+    border-color: var(--stage-line);
+  }
+  /* 低电量脉冲在暗色下更明显 */
+  .battery-block.is-crit {
+    animation: battery-pulse 2s ease-in-out infinite;
+  }
+  /* 仪表环虚线在暗色下稍亮 */
+  .gauge .ring-bg {
+    opacity: .4;
+  }
+}
+
+/* ── 减少动态效果（微雕层补充） ── */
+@media (prefers-reduced-motion: reduce) {
+  .battery-block.is-crit,
+  .map-name-tag.is-warn::before,
+  .kv .dot.ok {
+    animation: none !important;
+  }
+  .modal-head [data-modal-close],
+  .gauge .ring-fg {
+    transition: none !important;
+  }
+}
+
 /* ── 减少动态效果（动效层补充） ──
    前面已经有一条 prefers-reduced-motion，但它在动效层之前，
    动效层新增的 animation / transition 会覆盖它。
@@ -2126,5 +2296,8 @@ img { -webkit-user-drag: none; user-select: none; }
   .connect-card .field input,
   ::-webkit-scrollbar-thumb {
     transition: none !important;
+  }
+  .gauge .ring-fg {
+    filter: none !important;
   }
 }
