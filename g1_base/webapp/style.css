@@ -2246,6 +2246,152 @@ img { -webkit-user-drag: none; user-select: none; }
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   精致层
+   ══════════════════════════════════════════════════════════════
+   第五轮：让交互元素更有“物理感”和“活着”的感觉。 */
+
+/* ── D-pad 方向键：内阴影 + 触觉反馈 ──
+   建图页的方向键看起来应该是可以“按下去”的，
+   加一层内阴影模拟凹陷感，active 时压得更深。 */
+.dpad .btn {
+  box-shadow: inset 0 2px 5px rgba(0,0,0,.06);
+  border-width: 2px;
+  transition: transform .08s ease, box-shadow .1s ease, background .14s;
+}
+.dpad .btn:active {
+  transform: scale(.93);
+  box-shadow: inset 0 3px 8px rgba(0,0,0,.14);
+}
+
+/* ── 摇杆十字准线：虚线化 + 中心点 ──
+   实心准线看起来像辅助网格，虚线更像“参考线”。
+   中心加一个小圆点提示“零位”。 */
+.stick-base::before, .stick-base::after {
+  background: none;
+  border: none;
+}
+.stick-base::before {
+  left: 15%; right: 15%; height: 0;
+  border-top: 1px dashed var(--line-soft);
+}
+.stick-base::after {
+  top: 15%; bottom: 15%; width: 0;
+  border-left: 1px dashed var(--line-soft);
+}
+/* 中心零位指示点 */
+.stick-base {
+  position: relative;
+}
+
+/* ── 列表条目：悬浮抬升 ──
+   地图列表、动作列表的条目，hover 时微微抬起 + 边框变亮，
+   提示“这个可以点击”。 */
+.list-item {
+  transition: transform .14s ease, box-shadow .18s ease, border-color .14s;
+}
+.list-item:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--sh-lift);
+  border-color: var(--line-strong);
+}
+
+/* ── 日志框：交替行背景 ──
+   日志行太密时不好扫视，加一层极浅的交替背景色。 */
+.log-box {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent calc(var(--fs-xs) * 1.62),
+    rgba(128,128,128,.03) calc(var(--fs-xs) * 1.62),
+    rgba(128,128,128,.03) calc(var(--fs-xs) * 1.62 * 2)
+  );
+}
+
+/* ── 急停按钮：常驻脉冲红晕 ──
+   急停是最关键的按钮，应该在任何时候都能一眼看到。
+   加一个缓慢的红色脉冲，像心跳一样。 */
+@keyframes estop-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(178, 60, 55, .4); }
+  50%      { box-shadow: 0 0 0 5px rgba(178, 60, 55, 0); }
+}
+.btn.danger.solid {
+  animation: estop-pulse 3s ease-in-out infinite;
+  position: relative;
+}
+
+/* ── 地图容器：内阴影景深感 ──
+   地图区域加一层极浅的内阴影，看起来像是凹进去的“窗口”。 */
+.map-wrap {
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.06);
+}
+
+/* ── 模态框底部渐变分隔线 ── */
+.modal-head {
+  border-bottom: none;
+  position: relative;
+}
+.modal-head::after {
+  content: "";
+  position: absolute;
+  bottom: 0; left: var(--pad); right: var(--pad);
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--line) 15%,
+    var(--line) 85%,
+    transparent 100%);
+  pointer-events: none;
+}
+
+/* ── 徽章(badge)渐变背景 ── */
+.badge {
+  background: linear-gradient(135deg, var(--edge-soft) 0%, var(--sky-soft) 100%);
+  box-shadow: 0 1px 2px rgba(18, 160, 148, .1);
+}
+
+/* ── 导航点编辑器增强 ── */
+.wp-editor {
+  box-shadow: inset 0 0 0 1px var(--edge-soft);
+  position: relative;
+}
+.wp-editor::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--signal);
+  opacity: .5;
+}
+
+/* ── 暗色模式微雕 ── */
+@media (prefers-color-scheme: dark) {
+  /* D-pad 内阴影在暗色下更深 */
+  .dpad .btn {
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.3);
+  }
+  /* 急停脉冲在暗色下更明显 */
+  .btn.danger.solid {
+    animation: estop-pulse 2.5s ease-in-out infinite;
+  }
+  /* 地图内阴影在暗色下更深 */
+  .map-wrap {
+    box-shadow: inset 0 2px 10px rgba(0,0,0,.4);
+  }
+}
+
+/* ── 减少动态效果（精致层补充） ── */
+@media (prefers-reduced-motion: reduce) {
+  .btn.danger.solid {
+    animation: none !important;
+  }
+  .list-item,
+  .dpad .btn {
+    transition: none !important;
+  }
+}
+
 /* ── 减少动态效果（微雕层补充） ── */
 @media (prefers-reduced-motion: reduce) {
   .battery-block.is-crit,
