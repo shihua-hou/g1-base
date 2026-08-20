@@ -1069,8 +1069,8 @@ body {
   color: var(--signal);
 }
 .connect-mark svg { width: 24px; height: 24px; }
-.connect-card h1 { font-size: var(--fs-lg); margin: 0 0 5px; text-align: center; letter-spacing: .04em; text-transform: uppercase; font-weight: 700; }
-.connect-card p { color: var(--ink-2); font-size: var(--fs-sm); margin: 0 0 22px; text-align: center; line-height: 1.5; }
+.connect-card h1 { font-size: clamp(24px, 4vh, 38px); margin: 0 0 8px; text-align: center; letter-spacing: .06em; text-transform: uppercase; font-weight: 800; }
+.connect-card p { color: var(--ink-2); font-size: var(--fs-md); margin: 0 0 22px; text-align: center; line-height: 1.5; }
 
 .slider-row { display: flex; align-items: center; gap: 12px; }
 .slider-row input[type=range] { flex: 1; accent-color: var(--signal); height: 28px; }
