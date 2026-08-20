@@ -38,7 +38,13 @@
     el.className = `toast ${kind}`;
     el.textContent = message;
     document.body.appendChild(el);
-    setTimeout(() => el.remove(), 3200);
+    // 先加淡出类播放退出动画，再在动画结束后移除 DOM
+    setTimeout(() => {
+      el.classList.add("is-leaving");
+      el.addEventListener("animationend", () => el.remove(), { once: true });
+      // 兆底：如果动画事件没触发，400ms 后强制移除
+      setTimeout(() => { if (el.isConnected) el.remove(); }, 400);
+    }, 2900);
   }
 
   // 耗时操作的按钮忙碌态：禁用 + 换文案 + 转圈。
@@ -406,7 +412,7 @@
       </section>
       <nav class="nav-grid">
         ${HOME_TILES.map(([route, icon, name, sub]) => `
-          <button class="nav-tile" type="button" data-nav="${route}">
+          <button class="nav-tile" type="button" data-nav="${route}" data-accent="${route}">
             <span class="nav-tile-icon">${icon}</span>
             <span class="nav-tile-name">${name}</span>
             <span class="nav-tile-sub">${sub}</span>
@@ -2952,7 +2958,17 @@
       try {
         const res = await api(`/api/logs?lines=${lines}`);
         const box = document.getElementById("log-box");
-        box.textContent = (res.lines || []).join("\n") || "（无日志）";
+        const rawLines = res.lines || [];
+        if (!rawLines.length) { box.textContent = "（无日志）"; return; }
+        // 按日志等级着色：ERROR=红、WARN=黄、DEBUG=灰、其余默认
+        box.innerHTML = rawLines.map(line => {
+          const escaped = escapeHtml(line);
+          let cls = "log-line-info";
+          if (/\bERROR\b|\bCRITICAL\b/i.test(line)) cls = "log-line-error";
+          else if (/\bWARN(ING)?\b/i.test(line)) cls = "log-line-warn";
+          else if (/\bDEBUG\b/i.test(line)) cls = "log-line-debug";
+          return `<span class="${cls}">${escaped}</span>`;
+        }).join("\n");
         box.scrollTop = box.scrollHeight;
       } catch (err) {
         document.getElementById("log-box").textContent = "加载失败: " + err.message;

@@ -1278,3 +1278,846 @@ body {
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   动效层
+   ══════════════════════════════════════════════════════════════
+   在精修层之上，加入微量的「活」感——入场、悬浮、过渡。
+   所有动画遵循三个原则：
+   1. 首次出现的元素做入场动画（淡入 + 微移），之后不动；
+   2. 交互反馈用 transition，不用 animation（更可控）；
+   3. prefers-reduced-motion 全部关掉。
+   不在这一层改布局，也不改交互逻辑。 */
+
+/* ── 关键帧 ── */
+
+@keyframes pane-enter {
+  from { opacity: 0; transform: translateY(clamp(6px, 1.2vh, 14px)); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(18px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(-50%) translateY(0); }
+  to   { opacity: 0; transform: translateX(-50%) translateY(10px); }
+}
+@keyframes modal-mask-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modal-body-in {
+  from { opacity: 0; transform: scale(.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes shimmer-scan {
+  0%   { left: -40%; }
+  100% { left: 140%; }
+}
+@keyframes mark-breathe {
+  0%, 100% { box-shadow: 0 0 0 3px var(--edge-soft), 0 0 10px -2px var(--edge); }
+  50%      { box-shadow: 0 0 0 5px var(--edge-soft), 0 0 18px -2px var(--edge); }
+}
+@keyframes spin-ring {
+  to { transform: rotate(360deg); }
+}
+
+/* ── 面板入场 ──
+   每块面板在页面切换时有一个轻柔的淡入 + 上移。
+   用 animation-fill-mode: both 保证第一帧就是 opacity:0，不会闪一下。 */
+.pane {
+  animation: pane-enter .35s cubic-bezier(.22, .61, .36, 1) both;
+}
+/* 多列布局里，各列依次入场：左 → 中 → 右，每列晚 60ms */
+.page > .pane:nth-child(2) { animation-delay: .06s; }
+.page > .pane:nth-child(3) { animation-delay: .12s; }
+.page > .pane:nth-child(4) { animation-delay: .18s; }
+
+/* ── 首页磁贴：悬浮 ──
+   hover 时微抬 + 阴影加深 + 描边亮起。
+   平板没有 hover 但 :hover 不会报错，触屏上相当于不触发。 */
+.nav-tile {
+  transition: transform .2s ease, box-shadow .25s ease, border-color .25s ease;
+}
+.nav-tile:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--sh-lift);
+  border-color: var(--edge);
+}
+.nav-tile:hover .nav-tile-icon svg {
+  filter: drop-shadow(0 3px 10px var(--sky-soft));
+}
+.nav-tile-icon svg {
+  transition: filter .25s ease;
+}
+
+/* ── toast 通知：滑入 + 淡出 ── */
+.toast {
+  animation: toast-in .3s cubic-bezier(.22, .61, .36, 1) both;
+}
+.toast.is-leaving {
+  animation: toast-out .25s ease forwards;
+}
+
+/* ── 模态框：遮罩淡入 + 内容缩放 ── */
+.modal-mask {
+  animation: modal-mask-in .2s ease both;
+}
+.modal {
+  animation: modal-body-in .25s cubic-bezier(.22, .61, .36, 1) both;
+  animation-delay: .05s;
+}
+
+/* ── 品牌标记：柔和呼吸光晕 ──
+   4 秒一个周期，幅度很小——长时间盯着屏幕不觉得刺眼，
+   但余光能感知到「这个点是活的」，比死气沉沉的圆点高级。 */
+.sb-mark {
+  animation: mark-breathe 4s ease-in-out infinite;
+}
+
+/* ── 侧边栏条目：悬浮 ── */
+.side-item {
+  transition: background .14s, border-color .14s, padding-left .18s ease;
+}
+.side-item:hover:not(.active) {
+  background: var(--well);
+  border-left-color: var(--line-strong);
+  padding-left: clamp(16px, 1.6vw, 26px);
+}
+
+/* ── 按钮悬浮态 ──
+   主色按钮和危险按钮在 hover 时给一道描边辉光，
+   普通按钮只微微提亮底色。 */
+.btn {
+  transition: background .14s, border-color .14s, color .14s, box-shadow .2s ease, transform .12s ease;
+}
+.btn:hover:not(:disabled) {
+  box-shadow: 0 2px 8px -2px rgba(16, 23, 32, .14);
+}
+.btn.primary:hover:not(:disabled) {
+  box-shadow: var(--glow-signal), 0 4px 14px -4px rgba(31, 119, 196, .3);
+}
+.btn.danger.solid:hover:not(:disabled) {
+  box-shadow: 0 0 0 3px var(--crit-soft), 0 4px 14px -4px rgba(178, 60, 55, .3);
+}
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* ── 电量进度条：微光扫描 ──
+   一道白色高光从左到右缓慢扫过进度条，
+   暗示「系统在持续监控电量」——静态的进度条看起来像死的。 */
+.battery-fill {
+  position: relative;
+  overflow: hidden;
+}
+.battery-fill::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 40%;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, .22) 50%,
+    transparent 100%);
+  animation: shimmer-scan 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── 仪表环：描边辉光 ── */
+.gauge .ring-fg {
+  filter: drop-shadow(0 0 3px var(--signal-2));
+}
+.gauge.is-warn .ring-fg { filter: drop-shadow(0 0 3px var(--warn)); }
+.gauge.is-crit .ring-fg { filter: drop-shadow(0 0 3px var(--crit)); }
+
+/* ── 深色舞台：极细网格纹理 ──
+   给相机和点云的深色背景加一层几乎看不见的网格，
+   让纯黑底色不那么「死」，有「工程仪器」的感觉。 */
+.camera-stage, .cloud-stage {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, .025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .025) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── 摇杆拇指：加强光晕 ── */
+.stick-thumb {
+  box-shadow: 0 3px 10px -2px var(--signal), 0 0 16px -4px var(--signal);
+}
+.stick-base.active .stick-thumb {
+  box-shadow: 0 3px 14px -2px var(--signal), 0 0 24px -4px var(--edge);
+}
+
+/* ── 连接页卡片入场 ── */
+.connect-card {
+  animation: modal-body-in .4s cubic-bezier(.22, .61, .36, 1) both;
+}
+
+/* ── 地图工具按钮：悬浮 ── */
+.map-tool {
+  transition: background .14s, border-color .14s, transform .12s ease;
+}
+.map-tool:hover {
+  transform: scale(1.08);
+  border-color: var(--edge);
+}
+
+/* ── 列表条目：悬浮效果 ── */
+.list-item {
+  transition: border-color .18s ease, background .18s ease, transform .12s ease;
+}
+.list-item:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+
+/* ── 运动条芯片 ── */
+.motion-chip {
+  transition: background .14s, border-color .14s, color .14s, transform .12s ease;
+}
+.motion-chip:hover:not(.active) {
+  border-color: var(--signal);
+  color: var(--signal);
+  transform: translateY(-1px);
+}
+
+/* ── 分段标签 ── */
+.sb-tabs button {
+  transition: background .14s, color .14s, box-shadow .2s ease;
+}
+
+/* ── 急停按钮脉冲（仅视觉提示，不是持续动画） ──
+   急停按钮常驻红色实色，加一道极轻的外发光让它「存在感」更强 */
+.btn.danger.solid {
+  box-shadow: 0 0 0 2px var(--crit-soft);
+}
+.btn.danger.solid:hover {
+  box-shadow: 0 0 0 4px var(--crit-soft), 0 4px 14px -4px rgba(178, 60, 55, .35);
+}
+
+/* ── 顶栏底部主色线：微弱辉光 ── */
+.statusbar::after {
+  box-shadow: 0 0 8px -2px var(--signal);
+}
+
+/* ── 状态栏连接指示点脉冲 ── */
+.dot.ok {
+  animation: dot-ok-pulse 3s ease-in-out infinite;
+}
+@keyframes dot-ok-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--ok-soft); }
+  50%      { box-shadow: 0 0 0 5px var(--ok-soft), 0 0 8px -1px var(--ok); }
+}
+
+/* ── 导航页地图名标签 ── */
+.map-name-tag {
+  transition: background .2s ease, border-color .2s ease, color .2s ease;
+}
+
+/* ── 面板头部 eyebrow 分隔线微动效 ── */
+.pane-head {
+  position: relative;
+}
+.pane-head::after {
+  content: "";
+  position: absolute;
+  left: var(--pad); right: var(--pad); bottom: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--edge) 0%, var(--line-soft) 30%, transparent 70%);
+  opacity: .4;
+  pointer-events: none;
+}
+
+/* ── 任务块左侧色条：渐变过渡 ── */
+.task-block::before {
+  transition: background .3s ease;
+}
+
+/* ── 输入框聚焦时的过渡 ── */
+.field input, .field select, .field textarea, .inline-input {
+  transition: background .18s ease, border-color .18s ease, box-shadow .2s ease;
+}
+
+/* ── 滑块美化 ── */
+.slider-row input[type=range] {
+  transition: opacity .14s;
+}
+
+/* ── 滚动条淡入淡出 ── */
+::-webkit-scrollbar-thumb {
+  transition: background .2s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+  background-clip: content-box;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   细节层
+   ══════════════════════════════════════════════════════════════
+   最后一轮微雕，只加「有就不一样、没有也不会坏」的细节。 */
+
+/* ── 首页磁贴：6 块各自独立主题色 ──
+   原来 6 块磁贴共用同一个 sky-soft 角光，视觉上难以区分。
+   每块分配一个独特的色调，让“地图”“导航”“控制”等从颜色就能分辨。
+   色调只用于图标背景和极淡的角光，不抢主色调。 */
+.nav-tile[data-accent="map"]      { --tile-hue: 200; --tile-color: #1f77c4; --tile-soft: rgba(31,119,196,.09); }
+.nav-tile[data-accent="nav"]      { --tile-hue: 160; --tile-color: #12a094; --tile-soft: rgba(18,160,148,.09); }
+.nav-tile[data-accent="control"]  { --tile-hue: 35;  --tile-color: #c47f1f; --tile-soft: rgba(196,127,31,.09); }
+.nav-tile[data-accent="teach"]    { --tile-hue: 280; --tile-color: #8b5cf6; --tile-soft: rgba(139,92,246,.09); }
+.nav-tile[data-accent="state"]    { --tile-hue: 145; --tile-color: #10795f; --tile-soft: rgba(16,121,95,.09); }
+.nav-tile[data-accent="settings"] { --tile-hue: 220; --tile-color: #4d5a68; --tile-soft: rgba(77,90,104,.09); }
+
+.nav-tile {
+  background:
+    radial-gradient(120% 90% at 0% 0%, var(--tile-soft, var(--sky-soft)) 0%, transparent 46%),
+    var(--surface);
+}
+.nav-tile-icon svg {
+  color: var(--tile-color, var(--signal));
+  filter: drop-shadow(0 2px 8px var(--tile-soft, var(--sky-soft)));
+}
+.nav-tile:hover .nav-tile-icon svg {
+  filter: drop-shadow(0 4px 14px var(--tile-soft, var(--sky-soft)));
+}
+
+/* ── 导航进度条：微光扫描 ──
+   和电量条一样加一道白色高光扫过，暗示导航正在运行。 */
+.progress {
+  position: relative;
+  overflow: hidden;
+}
+.progress > i {
+  position: relative;
+  background-image: linear-gradient(180deg, rgba(255,255,255,.2) 0%, transparent 60%, rgba(0,0,0,.05) 100%);
+}
+.progress > i::after {
+  content: "";
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 50%;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(255, 255, 255, .3) 50%,
+    transparent 100%);
+  animation: shimmer-scan 2.5s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* ── 滑块 / range 自定义样式 ──
+   默认浏览器滑块太丑，这里统一成跟界面一致的样式。 */
+input[type=range] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  background: var(--line-soft);
+  border-radius: 999px;
+  outline: none;
+}
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: clamp(18px, 2.8vh, 24px);
+  height: clamp(18px, 2.8vh, 24px);
+  border-radius: 50%;
+  background: var(--signal);
+  background-image: linear-gradient(180deg, rgba(255,255,255,.2) 0%, transparent 60%);
+  border: 2px solid var(--surface);
+  box-shadow: 0 1px 4px rgba(0,0,0,.15), var(--glow-signal);
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .2s ease;
+}
+input[type=range]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 2px 8px rgba(0,0,0,.2), 0 0 0 4px var(--sky-soft);
+}
+input[type=range]::-webkit-slider-thumb:active {
+  transform: scale(1.05);
+}
+input[type=range]::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--signal);
+  border: 2px solid var(--surface);
+  box-shadow: 0 1px 4px rgba(0,0,0,.15);
+  cursor: pointer;
+}
+input[type=range]::-moz-range-track {
+  height: 6px; background: var(--line-soft); border-radius: 999px; border: none;
+}
+
+/* ── pane-head 左侧彩色竖条 ──
+   给面板标题区左側加一道 3px 色条，和 task-block 的左侧色条呼应，
+   让面板标题更有「章节起始」的感觉。 */
+.pane-head {
+  border-left: 3px solid var(--edge);
+}
+.pane-head .eyebrow {
+  padding-left: 2px;
+}
+
+/* ── 折叠区（details.adv）美化 ── */
+.adv {
+  border-top: 1px solid var(--line-soft);
+  padding-top: clamp(6px, 1vh, 10px);
+}
+.adv > summary {
+  position: relative;
+  padding-left: 14px;
+  color: var(--ink-2);
+  font-weight: 650;
+  letter-spacing: .05em;
+  transition: color .14s ease;
+}
+.adv > summary:hover { color: var(--signal); }
+.adv > summary::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  transition: transform .2s ease;
+}
+.adv[open] > summary::before {
+  content: "▸";
+  transform: rotate(90deg);
+}
+.adv[open] > summary {
+  color: var(--signal);
+}
+.adv-body {
+  border-left: 2px solid var(--line-soft);
+  margin-left: 6px;
+  padding-left: clamp(10px, 1vw, 14px);
+}
+
+/* ── 设置页表单卡片分组 ──
+   设置页的 .field 元素之间加一层卡片包裹，让各设置项看起来是独立的「设置卡」 */
+.pane-body.scroll .field {
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  padding: clamp(10px, 1.5vh, 16px) clamp(12px, 1.2vw, 18px);
+  margin-bottom: clamp(8px, 1.2vh, 14px);
+}
+.pane-body.scroll .field:last-child { margin-bottom: 0; }
+.pane-body.scroll .field label {
+  color: var(--ink-2);
+  font-weight: 700;
+  letter-spacing: .06em;
+}
+
+/* ── 空状态图标化 ──
+   没有数据时显示的 center-text 加一层柔和的底色和图标感。 */
+.center-text {
+  position: relative;
+  padding: clamp(18px, 3vh, 32px) 16px;
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+.center-text::before {
+  content: "";
+  display: block;
+  width: clamp(32px, 5vh, 44px);
+  height: clamp(32px, 5vh, 44px);
+  margin: 0 auto clamp(8px, 1.2vh, 14px);
+  border-radius: 50%;
+  background: var(--well);
+  border: 2px dashed var(--line-strong);
+  opacity: .6;
+}
+
+/* ── chip / badge 视觉增强 ── */
+.chip {
+  transition: border-color .18s ease, background .18s ease, transform .12s ease;
+}
+.chip:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+}
+.badge {
+  background-image: linear-gradient(180deg, rgba(255,255,255,.15) 0%, transparent 60%);
+  box-shadow: 0 1px 3px rgba(18, 160, 148, .15);
+}
+
+/* ── 日志着色 ──
+   日志框里的行按级别着色，INFO=默认，WARN=黄色，ERROR=红色，DEBUG=灰色。 */
+.log-line-info  { color: var(--ink-2); }
+.log-line-warn  { color: var(--warn); font-weight: 600; }
+.log-line-error { color: var(--crit); font-weight: 700; }
+.log-line-debug { color: var(--ink-3); opacity: .7; }
+
+/* ── 导航 headline 左侧色条加粗 + 渐变 ── */
+.headline {
+  border-left-width: 4px;
+  border-image: linear-gradient(180deg, var(--line-strong), transparent) 1;
+}
+.headline.tone-run {
+  border-image: linear-gradient(180deg, var(--signal), var(--signal-2)) 1;
+}
+.headline.tone-ok {
+  border-image: linear-gradient(180deg, var(--ok), transparent) 1;
+}
+.headline.tone-crit {
+  border-image: linear-gradient(180deg, var(--crit), transparent) 1;
+}
+
+/* ── toast 成功 / 错误图标装饰 ── */
+.toast {
+  padding-left: 36px;
+  position: relative;
+}
+.toast::before {
+  content: "ℹ";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 16px;
+  opacity: .85;
+}
+.toast.success::before { content: "✓"; }
+.toast.error::before   { content: "✕"; font-weight: 700; }
+
+/* ── 运动条当前动作标识 ── */
+.motion-chip.active {
+  background-image: linear-gradient(180deg, rgba(255,255,255,.12) 0%, transparent 60%);
+  box-shadow: var(--glow-signal);
+}
+
+/* ── 侧边栏选中态强化 ── */
+.side-item.active {
+  position: relative;
+}
+.side-item.active::after {
+  content: "";
+  position: absolute;
+  right: clamp(10px, 1vw, 16px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 6px -1px var(--signal);
+}
+
+/* ── 导航磁贴（小卡片）选中态 ── */
+.list-item.selected {
+  box-shadow: 0 0 0 2px var(--sky-soft), var(--sh-panel);
+}
+
+/* ── 暗色模式细节补强 ── */
+@media (prefers-color-scheme: dark) {
+  /* 磁贴角光在暗色下要更亮一点才能看见 */
+  .nav-tile {
+    background:
+      radial-gradient(120% 90% at 0% 0%, var(--tile-soft, var(--sky-soft)) 0%, transparent 50%),
+      var(--surface);
+  }
+  /* 设置页表单卡片在暗色下用更深的底色 */
+  .pane-body.scroll .field {
+    background: var(--well);
+    border-color: var(--line);
+  }
+  /* 空状态圆在暗色下稍微提亮 */
+  .center-text::before {
+    background: var(--surface-2);
+    border-color: var(--line-strong);
+  }
+  /* 折叠区在暗色下加一点左描边辉光 */
+  .adv-body {
+    border-left-color: var(--line);
+  }
+  /* headline 渐变更明显 */
+  .headline.tone-run {
+    border-image: linear-gradient(180deg, var(--signal), transparent) 1;
+  }
+  /* toast 暗色背景微调 */
+  .toast {
+    background: var(--surface-2);
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+  .toast.error { background: var(--crit); color: #fff; border-color: var(--crit); }
+  .toast.success { background: var(--ok); color: #0b1016; border-color: var(--ok); }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   微雕层
+   ══════════════════════════════════════════════════════════════
+   最后一轮抛光：全局细节和连接页体验。 */
+
+/* ── 文字选中色 ──
+   默认蓝色选中底色在仪表盘里太突兀，换成主色半透。 */
+::selection {
+  background: rgba(31, 119, 196, .22);
+  color: inherit;
+}
+@media (prefers-color-scheme: dark) {
+  ::selection { background: rgba(74, 163, 232, .3); }
+}
+
+/* ── 禁止拖拽图片 ──
+   平板上拖图片会触发浏览器默认行为（抖动、新标签页），全部禁用。 */
+img { -webkit-user-drag: none; user-select: none; }
+
+/* ── 连接页：雷达扫描动画 ──
+   连接页是用户打开控制台看到的第一屏，要给人“正在搜索机器人”的感觉。
+   connect-mark 是那个小方块图标，加一个扩散的环形脉冲。 */
+@keyframes radar-ping {
+  0%   { box-shadow: 0 0 0 0 rgba(18, 160, 148, .5); }
+  70%  { box-shadow: 0 0 0 18px rgba(18, 160, 148, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(18, 160, 148, 0); }
+}
+.connect-mark {
+  animation: radar-ping 2.2s ease-out infinite;
+}
+/* 连接页背景加一层微弱的径向光晕 */
+.connect-screen {
+  background:
+    radial-gradient(60% 50% at 50% 40%, var(--sky-soft) 0%, transparent 70%);
+}
+/* 连接页卡片增加微光边框 */
+.connect-card {
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--sh-lift), 0 0 0 1px var(--edge-soft);
+}
+/* 连接页输入框更突出 */
+.connect-card .field input {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  font-size: var(--fs-lg);
+  padding: clamp(12px, 2vh, 18px) 14px;
+  letter-spacing: .04em;
+}
+.connect-card .field input:focus {
+  border-color: var(--edge);
+  box-shadow: var(--glow);
+}
+/* 连接按钮更突出 */
+.connect-card .btn.primary {
+  font-size: var(--fs-md);
+  padding: clamp(13px, 2vh, 18px);
+  margin-top: clamp(8px, 1.2vh, 14px);
+  letter-spacing: .06em;
+  font-weight: 700;
+}
+
+/* ── 滚动面板：顶部/底部渐变淡出遮罩 ──
+   滚动内容接近边缘时渐淡消失，暗示“还有更多内容”。
+   用 mask-image 而不是 box-shadow overlay，因为它不挡住点击。 */
+.pane-body.scroll {
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black clamp(12px, 2vh, 24px),
+    black calc(100% - clamp(12px, 2vh, 24px)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black clamp(12px, 2vh, 24px),
+    black calc(100% - clamp(12px, 2vh, 24px)),
+    transparent 100%
+  );
+}
+
+/* ── pane-foot：渐变分隔线 ──
+   用渐变替代纯色 border-top，两端淡出，看起来更精致。 */
+.pane-foot {
+  border-top: none;
+  position: relative;
+}
+.pane-foot::before {
+  content: "";
+  position: absolute;
+  top: 0; left: var(--pad); right: var(--pad);
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--line) 15%,
+    var(--line) 85%,
+    transparent 100%);
+  pointer-events: none;
+}
+
+/* ── sb-back 返回按钮：箭头动效 ──
+   hover 时箭头文字向左微移，暗示“后退”方向。 */
+.sb-back {
+  transition: background .14s, border-color .14s, color .14s, padding-left .18s ease;
+}
+.sb-back:hover {
+  padding-left: clamp(14px, 1.4vw, 22px);
+  border-color: var(--edge);
+  color: var(--signal);
+}
+.sb-back:active {
+  padding-left: clamp(6px, .8vw, 10px);
+}
+
+/* ── motion-bar：机器人 3D 面板底部动作切换条 ──
+   加顶部渐变分隔线 + 底部微光，让它看起来像是浮在面板上的控制条。 */
+.motion-bar {
+  position: relative;
+  border-top: none;
+  background:
+    linear-gradient(180deg, var(--float-2) 0%, var(--surface) 100%);
+}
+.motion-bar::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 12px; right: 12px;
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--edge) 20%,
+    var(--signal) 50%,
+    var(--edge) 80%,
+    transparent 100%);
+  opacity: .4;
+  pointer-events: none;
+}
+
+/* ── 状态栏状态指示点右侧文字标签 ──
+   连接状态指示器里的文字在窄屏时可以稍淡。 */
+.sb-conn {
+  gap: 5px;
+}
+.sb-conn .dot {
+  transition: box-shadow .3s ease;
+}
+
+/* ── 导航页巡航点序号圆牌 ── */
+.wp-no {
+  background-image: linear-gradient(180deg, rgba(255,255,255,.18) 0%, transparent 60%);
+  box-shadow: 0 1px 3px rgba(31, 119, 196, .2);
+}
+
+/* ── 地图工具按钮：增加背景模糊感 ──
+   用多层半透明模拟毛玻璃（不用 backdrop-filter，Jetson 上会掉帧） */
+.map-tools .map-tool {
+  background:
+    linear-gradient(180deg, var(--float) 0%, var(--float-2) 100%);
+  border-color: var(--line-soft);
+}
+
+/* ── 导航页“落点确认”卡片加强 ── */
+.place-card {
+  background:
+    linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+  border-color: var(--edge);
+  box-shadow: var(--sh-lift), 0 0 0 1px var(--edge-soft);
+}
+
+/* ── 蹲下/站起按钮分组视觉 ──
+   控制页姿态按钮之间加极细分隔线，看起来是同一组 */
+.work-a .pane-body .btn + .btn {
+  border-top: 1px solid var(--line-soft);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.work-a .pane-body .btn:first-of-type {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.work-a .pane-body .btn:last-of-type {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* ── 定量转向按钮组同样处理 ── */
+.work-d .pane-body .btn + .btn {
+  border-top: 1px solid var(--line-soft);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+.work-d .pane-body .btn:first-of-type {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.work-d .pane-body .btn:last-of-type {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+/* ── 输入框 focus 时左侧出现一条主色竖线（仅 text/number 类） ── */
+.field input:focus,
+.inline-input:focus {
+  border-left: 2px solid var(--signal);
+  padding-left: 11px;  /* 补偿 border 宽度，文字不跳 */
+}
+
+/* ── 地图缩略图列表条目：选中时左侧色条 ── */
+.list-item.selected {
+  border-left: 3px solid var(--signal);
+}
+
+/* ── 暗色模式微雕 ── */
+@media (prefers-color-scheme: dark) {
+  /* 连接页雷达脉冲在暗色下更明显 */
+  @keyframes radar-ping {
+    0%   { box-shadow: 0 0 0 0 rgba(47, 201, 187, .6); }
+    70%  { box-shadow: 0 0 0 22px rgba(47, 201, 187, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(47, 201, 187, 0); }
+  }
+  /* 连接页背景光晕在暗色下用主色 */
+  .connect-screen {
+    background:
+      radial-gradient(60% 50% at 50% 40%, rgba(74, 163, 232, .06) 0%, transparent 70%);
+  }
+  /* 姿态按钮分隔线在暗色下用更亮的颜色 */
+  .work-a .pane-body .btn + .btn,
+  .work-d .pane-body .btn + .btn {
+    border-top-color: var(--line);
+  }
+  /* motion-bar 在暗色下底部加一道微光 */
+  .motion-bar {
+    box-shadow: 0 -1px 6px -2px var(--signal);
+  }
+  /* 落点确认卡片暗色加强辉光 */
+  .place-card {
+    box-shadow: var(--sh-lift), 0 0 0 1px var(--edge-soft), 0 0 18px -6px var(--edge);
+  }
+}
+
+/* ── 减少动态效果（动效层补充） ──
+   前面已经有一条 prefers-reduced-motion，但它在动效层之前，
+   动效层新增的 animation / transition 会覆盖它。
+   这里再补一条，确保系统开了“减少动态效果”时全部关掉。 */
+@media (prefers-reduced-motion: reduce) {
+  .pane,
+  .toast,
+  .modal-mask,
+  .modal,
+  .sb-mark,
+  .connect-card,
+  .connect-mark,
+  .dot.ok,
+  .battery-fill::after,
+  .progress > i::after {
+    animation: none !important;
+  }
+  .nav-tile,
+  .nav-tile-icon svg,
+  .side-item,
+  .btn,
+  .map-tool,
+  .list-item,
+  .motion-chip,
+  .sb-tabs button,
+  .sb-back,
+  .stick-thumb,
+  .map-name-tag,
+  .task-block::before,
+  .field input, .field select, .field textarea, .inline-input,
+  .chip,
+  .adv > summary,
+  input[type=range]::-webkit-slider-thumb,
+  .sb-conn .dot,
+  .connect-card .field input,
+  ::-webkit-scrollbar-thumb {
+    transition: none !important;
+  }
+}
