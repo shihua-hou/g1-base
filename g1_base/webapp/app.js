@@ -36,7 +36,10 @@
   function toast(message, kind = "") {
     const el = document.createElement("div");
     el.className = `toast ${kind}`;
-    el.textContent = message;
+    const icon = kind === "error" ? ICONS.warn
+               : kind === "success" ? ICONS.ok
+               : "";
+    el.innerHTML = `${icon ? `<span class="toast-icon">${icon}</span>` : ""}<span class="toast-text">${escapeHtml(message)}</span>`;
     document.body.appendChild(el);
     // 先加淡出类播放退出动画，再在动画结束后移除 DOM
     setTimeout(() => {

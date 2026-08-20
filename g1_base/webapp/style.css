@@ -2381,6 +2381,94 @@ img { -webkit-user-drag: none; user-select: none; }
   }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   润色层
+   ══════════════════════════════════════════════════════════════
+   第六轮：图标、空状态、输入细节打磨。 */
+
+/* ── toast 图标 ──
+   给成功/错误 toast 前面加一个小图标，扫视时更容易识别。 */
+.toast { display: flex; align-items: center; gap: 8px; }
+.toast-icon { width: 18px; height: 18px; flex-shrink: 0; }
+.toast-icon svg { width: 100%; height: 100%; fill: currentColor; }
+
+/* ── 隐藏数字输入框的上下箭头 ──
+   平板上的 number 输入框不需要微调箭头，反而容易误触。 */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
+
+/* ── 状态栏底部 IP / hostname 加图标前缀 ──
+   用等宽小标签替代裸文本，更精致，便于快速定位。 */
+.status-foot span:first-child::before {
+  content: "IP ";
+  color: var(--ink-3);
+  font-weight: 500;
+  margin-right: 4px;
+}
+.status-foot span:last-child::before {
+  content: "HOST ";
+  color: var(--ink-3);
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+/* ── 加载中空状态：脉冲动画 ──
+   页面刚打开时所有“加载中…”的提示，加一个极淡的呼吸感。 */
+@keyframes loading-pulse {
+  0%, 100% { opacity: .45; }
+  50%      { opacity: .85; }
+}
+.center-text:has(br + small) {
+  animation: loading-pulse 2s ease-in-out infinite;
+}
+
+/* ── stage-hint 加图标前缀 ──
+   机器人面板右上角的操作提示，前面加一个小圆圈 i。 */
+.stage-hint::before {
+  content: "i";
+  display: inline-block;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  color: var(--surface);
+  font-size: 9px; font-weight: 800; line-height: 12px;
+  text-align: center;
+  margin-right: 5px;
+}
+.stage-hint {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ── motion-bar 空状态提示 ──
+   当没有任何动作芯片时，.motion-now 显示“加载中…”或“无动作”，
+   给它一个更柔和的样式，不要看起来像错误。 */
+.motion-bar:has(.motion-now:only-child) .motion-now {
+  color: var(--ink-3);
+  font-style: italic;
+}
+
+/* ── 暗色模式微调 ── */
+@media (prefers-color-scheme: dark) {
+  .stage-hint::before {
+    background: var(--stage-ink-2);
+    color: var(--stage-dark);
+  }
+}
+
+/* ── 减少动态效果（润色层补充） ── */
+@media (prefers-reduced-motion: reduce) {
+  .center-text:has(br + small) {
+    animation: none !important;
+  }
+}
+
 /* ── 减少动态效果（精致层补充） ── */
 @media (prefers-reduced-motion: reduce) {
   .btn.danger.solid {
